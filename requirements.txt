@@ -1,0 +1,16 @@
+# CatCam Python dependencies
+#
+# Recommended installation on Raspberry Pi OS:
+#
+# sudo apt install python3-picamera2 python3-numpy python3-requests python3-pil
+#
+# Picamera2 depends on Raspberry Pi camera libraries and should
+# be installed through the Raspberry Pi OS package manager.
+#
+# Python packages:
+numpy
+requests
+Pillow
+
+# System-managed:
+# picamera2

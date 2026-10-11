@@ -1,0 +1,15 @@
+[Unit]
+Description=CatCam Wildlife Camera
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi
+EnvironmentFile=/etc/catcam.env
+ExecStart=/usr/bin/python3 /home/pi/catcam/wildlife_camera.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Credentials and secrets
+.env
+.env.*
+*.env
+catcam.env
+*webhook*
+*.pem
+*.key
+
+# CatCam local configuration
+catcam_settings.json
+.catcam-discord
+
+# Wildlife photographs
+wildlife/
+photos/
+captures/
+*.jpg
+*.jpeg
+*.png
+
+# Logs and temporary files
+*.log
+*.tmp
+.DS_Store
+
+# Backups
+*.bak
+*.backup
+wildlife_camera_v*.py
+wildlife_camera_before_*.py
