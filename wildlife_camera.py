@@ -10,6 +10,7 @@ import socket
 import threading
 import catcam_stats
 import bird_detection
+import catcam_cleanup
 import json
 from urllib.parse import urlparse, unquote, parse_qs
 from pathlib import Path
@@ -1345,6 +1346,11 @@ web_thread.start()
 
 # Start background Google Vision processing.
 start_bird_detection_worker()
+threading.Thread(
+    target=catcam_cleanup.cleanup_worker,
+    daemon=True,
+    name="CatCamPhotoCleanup"
+).start()
 
 # ============================================================
 # Motion detection loop

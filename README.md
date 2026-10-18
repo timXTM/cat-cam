@@ -28,10 +28,34 @@ A Raspberry Pi wildlife camera that captures motion-triggered photo bursts, prov
 - Individual photo classification and burst-level results: `bird`, `no_bird`, or `pending`
 - Discord notifications for bird-positive bursts, including only photos classified as containing birds
 - No Discord notification for bursts classified as having no birds
-- Photos remain stored locally regardless of their classification
+- Bird-containing bursts are retained; fully classified non-bird bursts are eligible for automatic cleanup after 24 hours
 - Monthly Google Vision request budget of **900 images**, tracked in SQLite
 
 **Note:** Bird detection is not the same as reliable species identification. Species-level statistics are not yet implemented. Bird-positive Discord delivery has been implemented, but a live bird-positive event has not yet been verified end-to-end.
+
+### Automatic non-bird photo cleanup
+
+The `catcam_cleanup.py` module provides a conservative **24-hour retention policy** for non-bird bursts. When the updated application is deployed and its service restarted, a background worker checks for eligible bursts every **15 minutes**.
+
+A burst is eligible only when:
+
+- The event is at least **24 hours old** and classified as `no_bird`.
+- All **six** expected photographs have individual database classifications of **no bird**.
+- The event is not already marked as deleted.
+- The burst directory is in the expected `/home/pi/wildlife/YYYY-MM-DD/HH-MM-SS/` location, contains exactly `01.jpg` through `06.jpg`, and passes path and file safety checks.
+
+**Retained:** Any burst containing a bird, awaiting classification, having incomplete/failed classification, or failing a safety check. The cleanup removes eligible JPEG files and their now-empty burst folder, but **preserves SQLite event and photo-classification records** for the dashboard.
+
+Preview eligible deletions without deleting anything:
+
+```bash
+cd /home/pi/catcam
+python3 catcam_cleanup.py --dry-run
+```
+
+The cleanup worker starts when CatCam starts; merely committing or pulling these files does **not** activate it until the running service is restarted. Run the dry-run and review its output before restarting to enable cleanup.
+
+**Syncthing warning:** If your photo folder is synchronized to another device, deletion on the Pi may propagate to that device. Confirm your Syncthing configuration and backups before enabling cleanup.
 
 ### Statistics dashboard
 
@@ -54,6 +78,7 @@ Statistics refresh automatically approximately every 30 seconds. Event and photo
 | `wildlife_camera.py` | Camera capture, motion detection, LAN webpage, background worker, and Discord integration |
 | `bird_detection.py` | Google Cloud Vision bird classification |
 | `catcam_stats.py` | SQLite event, photo, and API usage tracking |
+| `catcam_cleanup.py` | Conservative 24-hour cleanup of fully classified non-bird bursts |
 | `catcam.service` | `systemd` service definition |
 | `update.sh` | Update from GitHub and restart the service |
 | `requirements.txt` | Python dependency list |
@@ -124,8 +149,8 @@ journalctl -u catcam.service -n 50 --no-pager
 
 ## Current status and planned improvements
 
-**Implemented:** Camera capture, ROI motion detection, LAN controls and gallery, SQLite statistics, background Google Vision classification, bird-filtered Discord logic, and the statistics dashboard.
+**Implemented in code:** Camera capture, ROI motion detection, LAN controls and gallery, SQLite statistics, background Google Vision classification, bird-filtered Discord logic, statistics dashboard, and 24-hour non-bird cleanup. **Cleanup must be dry-run verified and the Pi service restarted before it is active.**
 
 **Awaiting field verification:** A naturally occurring bird-positive event, including the exact images delivered to Discord.
 
-**Not yet implemented:** Reliable bird species identification and species-level statistics; automatic deletion of no-bird photo bursts. **Automatic photo deletion is currently disabled.**
+**Not yet implemented:** Reliable bird species identification and species-level statistics.
