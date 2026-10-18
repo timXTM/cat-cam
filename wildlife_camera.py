@@ -334,6 +334,17 @@ button { border:0; border-radius:8px; padding:10px 16px; font-size:1rem; cursor:
 .event { background:#1d1d1d; border-radius:8px; padding:8px; }
 .event img { width:100%; height:180px; object-fit:cover; border-radius:5px; }
 .event a,a { color:#ddd; text-decoration:none; }
+.stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(135px,1fr)); gap:10px; }
+.stat-card { background:#242424; padding:13px; border-radius:8px; }
+.stat-value { font-size:1.7rem; font-weight:700; line-height:1.25; }
+.stat-label { color:#bbb; font-size:.84rem; margin-top:4px; }
+.usage-track { height:10px; background:#383838; border-radius:8px; overflow:hidden; margin-top:10px; }
+.usage-fill { height:100%; background:#71b7f2; width:0%; transition:width .3s; }
+.table-wrap { overflow-x:auto; }
+.activity-table { border-collapse:collapse; width:100%; font-size:.9rem; white-space:nowrap; }
+.activity-table th,.activity-table td { text-align:left; padding:9px 12px 9px 0; border-bottom:1px solid #333; }
+.activity-table th { color:#bbb; font-weight:500; }
+.stats-footnote { color:#aaa; font-size:.8rem; margin-top:10px; }
 </style>
 </head>
 <body>
@@ -371,6 +382,21 @@ button { border:0; border-radius:8px; padding:10px 16px; font-size:1rem; cursor:
     <span id="status" class="status">Monitoring</span>
   </div>
 </div>
+
+<section class="panel" aria-label="CatCam statistics">
+  <div class="readout"><h2 style="margin:0">Statistics</h2><span id="statsUpdated" class="small">Loading...</span></div>
+  <div class="stats-grid" id="statsGrid"></div>
+  <div style="margin-top:16px"><strong>Google Vision requests this month</strong>
+    <div id="apiUsage" class="small" style="margin-top:5px">Loading...</div>
+    <div class="usage-track"><div id="apiUsageFill" class="usage-fill"></div></div>
+  </div>
+  <h3>Recent activity</h3>
+  <div class="table-wrap"><table class="activity-table">
+    <thead><tr><th>Time</th><th>Trigger</th><th>Classification</th><th>Bird photos</th><th>Discord</th></tr></thead>
+    <tbody id="activityRows"><tr><td colspan="5">Loading...</td></tr></tbody>
+  </table></div>
+  <div class="stats-footnote">Statistics cover events recorded since database tracking was enabled. Refreshes every 30 seconds.</div>
+</section>
 
 <h2>Recent captures</h2>
 <div id="events" class="events">Loading...</div>
@@ -519,6 +545,60 @@ button.addEventListener("click",async()=>{
   }catch(e){statusEl.textContent=e.message;}
   setTimeout(()=>{button.disabled=false;statusEl.textContent="Monitoring";},3000);
 });
+const statsGrid=document.getElementById("statsGrid");
+const statsUpdated=document.getElementById("statsUpdated");
+const activityRows=document.getElementById("activityRows");
+const statFields=[
+  ["total_triggers","Total triggers"],
+  ["motion_triggers","Motion triggers"],
+  ["manual_triggers","Manual triggers"],
+  ["bird_bursts","Bird events"],
+  ["no_bird_bursts","Non-bird events"],
+  ["pending_bursts","Pending / incomplete"],
+  ["bird_photos","Bird photographs"],
+  ["discord_notifications","Discord notifications"],
+  ["deleted_bursts","Deleted events"]
+];
+function cell(row,value){
+  const td=document.createElement("td");
+  td.textContent=value;
+  row.appendChild(td);
+}
+async function loadStatistics(){
+  try{
+    const response=await fetch("/api/statistics",{cache:"no-store"});
+    if(!response.ok)throw new Error("Statistics unavailable");
+    const data=await response.json();
+    statsGrid.replaceChildren();
+    for(const [key,label] of statFields){
+      const card=document.createElement("div");card.className="stat-card";
+      const value=document.createElement("div");value.className="stat-value";
+      value.textContent=Number(data.summary[key]||0).toLocaleString();
+      const name=document.createElement("div");name.className="stat-label";name.textContent=label;
+      card.append(value,name);statsGrid.appendChild(card);
+    }
+    const used=data.summary.api_requests,limit=data.summary.api_limit;
+    document.getElementById("apiUsage").textContent=`${used.toLocaleString()} / ${limit.toLocaleString()} requests (${Math.max(0,limit-used).toLocaleString()} remaining)`;
+    document.getElementById("apiUsageFill").style.width=`${Math.min(100,100*used/Math.max(1,limit))}%`;
+    activityRows.replaceChildren();
+    if(!data.recent.length){
+      const tr=document.createElement("tr");cell(tr,"No recorded events yet.");activityRows.appendChild(tr);
+    }
+    for(const e of data.recent){
+      const tr=document.createElement("tr");
+      const dt=new Date(e.timestamp);
+      cell(tr,Number.isNaN(dt.getTime())?e.timestamp:dt.toLocaleString());
+      cell(tr,e.trigger_source);
+      cell(tr,e.classification.replaceAll("_"," "));
+      cell(tr,`${e.bird_photo_count} / ${e.photo_count}`);
+      cell(tr,e.discord_status);
+      activityRows.appendChild(tr);
+    }
+    statsUpdated.textContent="Updated "+new Date().toLocaleTimeString();
+  }catch(error){statsUpdated.textContent="Could not load statistics";}
+}
+loadStatistics();
+setInterval(loadStatistics,30000);
 loadSettings(); loadStatus(); loadEvents();
 setInterval(loadStatus,1000);
 </script>
@@ -584,6 +664,16 @@ setInterval(loadStatus,1000);
                 json.dumps({"current_motion": motion, "motion_threshold": threshold}),
                 "application/json; charset=utf-8"
             )
+            return
+
+        if path == "/api/statistics":
+            try:
+                data = catcam_stats.get_dashboard_data()
+                self.send_body(200, json.dumps(data), "application/json; charset=utf-8")
+            except Exception as exc:
+                print(f"Statistics API failed: {exc}", flush=True)
+                self.send_body(500, json.dumps({"error": "Statistics unavailable"}),
+                               "application/json; charset=utf-8")
             return
 
         if path == "/api/events":
@@ -849,7 +939,7 @@ def send_discord_notification(
             flush=True
         )
 
-        return
+        return False
 
     if not DISCORD_WEBHOOK_URL:
 
@@ -859,7 +949,7 @@ def send_discord_notification(
             flush=True
         )
 
-        return
+        return False
 
     timestamp_text = event_timestamp.strftime(
         "%Y-%m-%d %I:%M:%S %p"
@@ -869,7 +959,7 @@ def send_discord_notification(
         f"CatCam motion detected\n"
         f"{timestamp_text}\n"
         f"ROI motion: {motion_percent:.1f}%\n"
-        f"{len(photos)} photos captured\n"
+        f"{len(photos)} bird-positive photos detected\n"
         f"Folder: {event_dir}"
     )
 
@@ -921,6 +1011,8 @@ def send_discord_notification(
             flush=True
         )
 
+        return True
+
     except Exception as error:
 
         # Discord failure must never stop photography.
@@ -929,6 +1021,8 @@ def send_discord_notification(
             f"Discord notification failed: {error}",
             flush=True
         )
+
+        return False
 
     finally:
 
@@ -1049,99 +1143,102 @@ def capture_full_resolution_burst(event_dir):
 # ============================================================
 
 def bird_detection_worker():
+    """Classify queued bursts and send only bird-positive images to Discord.
+
+    No photos are deleted. Failed/incomplete classifications are preserved.
     """
-    Process completed, pending capture events.
-
-    SQLite is the persistent queue. Events survive reboots.
-
-    Classification errors are recorded without deleting photos.
-    Failed events are not automatically retried.
-    """
-
     print("Bird detection worker started", flush=True)
-
     while True:
         try:
             with catcam_stats.connect() as conn:
-                rows = conn.execute("""
-                    SELECT id, folder, photo_count
+                row = conn.execute("""
+                    SELECT id, folder, photo_count, motion_percent, classification
                     FROM events
-                    WHERE classification = 'pending'
-                      AND photo_count > 0
-                    ORDER BY id
-                    LIMIT 1
-                """).fetchall()
-
-            if not rows:
+                    WHERE (classification='pending' AND photo_count > 0)
+                       OR (classification='bird' AND discord_status='pending')
+                    ORDER BY id LIMIT 1
+                """).fetchone()
+            if row is None:
                 time.sleep(5)
                 continue
 
-            event_id, folder, expected_count = rows[0]
+            event_id, folder, expected_count, motion_percent, classification = row
             event_dir = Path(folder)
 
-            photos = sorted(event_dir.glob("*.jpg"))
-
-            # Do not classify incomplete or missing bursts.
-            if len(photos) != expected_count:
+            if classification == 'pending':
+                photos = sorted(event_dir.glob('*.jpg'))
+                if len(photos) != expected_count:
+                    catcam_stats.update_event(
+                        event_id, classification='error',
+                        error='Photograph count mismatch'
+                    )
+                    continue
+                catcam_stats.update_event(event_id, classification='processing')
+                print(f'Analyzing event {event_id}: {event_dir}', flush=True)
+                result = bird_detection.detect_burst(photos)
+                catcam_stats.save_photo_detections(event_id, result['results'])
+                if not result['complete']:
+                    errors = '; '.join(e['error'] for e in result['errors'])
+                    catcam_stats.update_event(
+                        event_id, classification='error',
+                        bird_photo_count=len(result['bird_photos']),
+                        error=errors or 'Incomplete classification'
+                    )
+                    print(f'Event {event_id}: classification incomplete', flush=True)
+                    continue
                 catcam_stats.update_event(
-                    event_id,
-                    classification="error",
-                    error="Photograph count mismatch"
+                    event_id, classification=result['classification'],
+                    bird_photo_count=len(result['bird_photos']), error=None
+                )
+                print(
+                    f"Event {event_id}: {result['classification']} "
+                    f"({len(result['bird_photos'])} bird photos)", flush=True
+                )
+                if result['classification'] == 'no_bird':
+                    catcam_stats.update_event(event_id, discord_status='not_needed')
+                    print(f'Event {event_id}: Discord skipped (no birds)', flush=True)
+                    continue
+
+            bird_photos = catcam_stats.get_bird_photos(event_id)
+            if not bird_photos or not all(p.is_file() for p in bird_photos):
+                catcam_stats.update_event(
+                    event_id, discord_status='error',
+                    error='Bird photo classifications missing or files absent'
                 )
                 continue
+            if not DISCORD_TOGGLE.exists():
+                catcam_stats.update_event(event_id, discord_status='disabled')
+                print(f'Event {event_id}: Discord disabled', flush=True)
+                continue
+            if not DISCORD_WEBHOOK_URL:
+                catcam_stats.update_event(event_id, discord_status='failed')
+                print(f'Event {event_id}: Discord webhook not configured', flush=True)
+                continue
 
-            # Claim this event before making API requests.
-            # An interrupted event is recovered at startup.
-            catcam_stats.update_event(
-                event_id,
-                classification="processing"
+            try:
+                event_timestamp = datetime.strptime(
+                    f'{event_dir.parent.name}/{event_dir.name}',
+                    '%Y-%m-%d/%H-%M-%S'
+                )
+            except ValueError:
+                catcam_stats.update_event(event_id, discord_status='error',
+                                          error='Invalid event folder timestamp')
+                continue
+
+            # Mark as sending first: a crash during upload may require manual review.
+            catcam_stats.update_event(event_id, discord_status='sending')
+            success = send_discord_notification(
+                bird_photos, event_dir, motion_percent or 0.0, event_timestamp
             )
-
-            print(
-                f"Analyzing event {event_id}: {event_dir}",
-                flush=True
-            )
-
-            result = bird_detection.detect_burst(photos)
-
-            if result["complete"]:
+            if success:
                 catcam_stats.update_event(
-                    event_id,
-                    classification=result["classification"],
-                    bird_photo_count=len(result["bird_photos"]),
-                    error=None
+                    event_id, discord_sent=1,
+                    discord_photo_count=len(bird_photos), discord_status='sent'
                 )
-
-                print(
-                    f"Event {event_id}: "
-                    f"{result['classification']} "
-                    f"({len(result['bird_photos'])} bird photos)",
-                    flush=True
-                )
-
             else:
-                errors = "; ".join(
-                    item["error"]
-                    for item in result["errors"]
-                )
-
-                catcam_stats.update_event(
-                    event_id,
-                    classification="error",
-                    bird_photo_count=len(result["bird_photos"]),
-                    error=errors or "Incomplete classification"
-                )
-
-                print(
-                    f"Event {event_id}: classification incomplete",
-                    flush=True
-                )
-
+                catcam_stats.update_event(event_id, discord_status='failed')
         except Exception as exc:
-            print(
-                f"Bird detection worker error: {exc}",
-                flush=True
-            )
+            print(f'Bird detection worker error: {exc}', flush=True)
             time.sleep(10)
 
 
@@ -1230,9 +1327,7 @@ def run_capture_event(changed_percent, trigger_source):
                 error="Incomplete capture or rotation failure"
             )
 
-        send_discord_notification(
-            captured_photos,event_dir,changed_percent,event_timestamp
-        )
+        # Discord is sent by the bird-detection worker after classification.
     finally:
         with camera_busy_lock:
             camera_busy=False

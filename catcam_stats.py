@@ -65,6 +65,8 @@ def update_event(event_id, **fields):
         "classification",
         "bird_photo_count",
         "discord_sent",
+        "discord_photo_count",
+        "discord_status",
         "deleted",
         "deleted_at",
         "error"
@@ -161,3 +163,87 @@ def get_statistics():
 
 
 initialize()
+
+
+def initialize_step4():
+    """Add photo-level classifications and Discord delivery state."""
+    with connect() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS photo_detections (
+                event_id INTEGER NOT NULL,
+                photo_path TEXT NOT NULL,
+                bird_detected INTEGER NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0,
+                labels_json TEXT,
+                PRIMARY KEY (event_id, photo_path)
+            )
+        """)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
+        if 'discord_photo_count' not in columns:
+            conn.execute("ALTER TABLE events ADD COLUMN discord_photo_count INTEGER DEFAULT 0")
+        if 'discord_status' not in columns:
+            conn.execute("ALTER TABLE events ADD COLUMN discord_status TEXT DEFAULT 'pending'")
+
+
+def save_photo_detections(event_id, results):
+    """Persist successful per-image classifications, even if a burst is incomplete."""
+    import json
+    with connect() as conn:
+        for result in results:
+            conn.execute("""
+                INSERT INTO photo_detections
+                    (event_id, photo_path, bird_detected, confidence, labels_json)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(event_id, photo_path) DO UPDATE SET
+                    bird_detected=excluded.bird_detected,
+                    confidence=excluded.confidence,
+                    labels_json=excluded.labels_json
+            """, (
+                event_id, str(result['photo']), int(result['bird_detected']),
+                float(result['bird_confidence']), json.dumps(result['bird_labels'])
+            ))
+
+
+def get_bird_photos(event_id):
+    with connect() as conn:
+        rows = conn.execute("""
+            SELECT photo_path FROM photo_detections
+            WHERE event_id = ? AND bird_detected = 1
+            ORDER BY photo_path
+        """, (event_id,)).fetchall()
+    return [Path(row[0]) for row in rows]
+
+
+initialize_step4()
+
+
+def get_dashboard_data(limit=10):
+    """Read-only snapshot for the LAN dashboard."""
+    with connect() as conn:
+        conn.row_factory = sqlite3.Row
+        summary_row = conn.execute("""
+            SELECT
+                COUNT(*) AS total_triggers,
+                COALESCE(SUM(CASE WHEN trigger_source='motion' THEN 1 ELSE 0 END),0) AS motion_triggers,
+                COALESCE(SUM(CASE WHEN trigger_source='manual' THEN 1 ELSE 0 END),0) AS manual_triggers,
+                COALESCE(SUM(CASE WHEN classification='bird' THEN 1 ELSE 0 END),0) AS bird_bursts,
+                COALESCE(SUM(CASE WHEN classification='no_bird' THEN 1 ELSE 0 END),0) AS no_bird_bursts,
+                COALESCE(SUM(CASE WHEN classification NOT IN ('bird','no_bird') OR classification IS NULL THEN 1 ELSE 0 END),0) AS pending_bursts,
+                COALESCE(SUM(COALESCE(bird_photo_count,0)),0) AS bird_photos,
+                COALESCE(SUM(COALESCE(discord_sent,0)),0) AS discord_notifications,
+                COALESCE(SUM(COALESCE(deleted,0)),0) AS deleted_bursts
+            FROM events
+        """).fetchone()
+        recent_rows = conn.execute("""
+            SELECT timestamp, trigger_source, classification,
+                   COALESCE(photo_count,0) AS photo_count,
+                   COALESCE(bird_photo_count,0) AS bird_photo_count,
+                   COALESCE(discord_status,'unknown') AS discord_status
+            FROM events ORDER BY id DESC LIMIT ?
+        """, (max(1, min(int(limit), 50)),)).fetchall()
+        usage = conn.execute("SELECT requests FROM api_usage WHERE month=?",
+                             (current_month(),)).fetchone()
+    summary = dict(summary_row)
+    summary['api_requests'] = usage[0] if usage else 0
+    summary['api_limit'] = MONTHLY_API_LIMIT
+    return {'summary': summary, 'recent': [dict(row) for row in recent_rows]}
