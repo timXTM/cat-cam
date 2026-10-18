@@ -11,6 +11,7 @@ import threading
 import catcam_stats
 import bird_detection
 import catcam_cleanup
+import catcam_thumbnails
 import json
 from urllib.parse import urlparse, unquote, parse_qs
 from pathlib import Path
@@ -471,29 +472,12 @@ class CatCamHandler(BaseHTTPRequestHandler):
                 self.send_error(404)
                 return
 
-            # The gallery requests small cached previews. Full-size JPEGs are
-            # transferred only when the visitor opens the enlarged viewer.
+            # Serve small cached previews. Generate lazily as a fallback for
+            # historical bursts or any queued thumbnail job still in progress.
             image_to_send = photo
             if path.startswith("/thumb/"):
-                cache_file = (Path("/home/pi/catcam_data/thumbnails") /
-                              date_name / event_name / filename)
                 try:
-                    original_stat = photo.stat()
-                    if (not cache_file.is_file() or
-                            cache_file.stat().st_mtime_ns < original_stat.st_mtime_ns):
-                        cache_file.parent.mkdir(parents=True, exist_ok=True)
-                        temporary = cache_file.with_name(
-                            cache_file.name + f".{threading.get_ident()}.tmp")
-                        try:
-                            with Image.open(photo) as source:
-                                source.thumbnail((420, 420), Image.Resampling.LANCZOS)
-                                if source.mode != "RGB":
-                                    source = source.convert("RGB")
-                                source.save(temporary, format="JPEG", quality=72)
-                            os.replace(temporary, cache_file)
-                        finally:
-                            temporary.unlink(missing_ok=True)
-                    image_to_send = cache_file
+                    image_to_send = catcam_thumbnails.ensure_thumbnail(photo)
                 except (OSError, ValueError) as exc:
                     print(f"Thumbnail generation failed: {exc}", flush=True)
                     self.send_error(500, "Thumbnail unavailable")
@@ -1056,6 +1040,12 @@ def run_capture_event(changed_percent, trigger_source):
             if rotate_photo(photo): successes+=1
         print(f"Rotation complete: {successes}/{len(captured_photos)} successful",flush=True)
 
+        # Queue thumbnail generation only after the six originals are fully
+        # written and rotated. The worker runs independently of capture and
+        # Google Vision classification, so it does not delay either operation.
+        if len(captured_photos) == BURST_COUNT and successes == BURST_COUNT:
+            catcam_thumbnails.queue_event(event_dir)
+
         # The background worker picks up this event from SQLite.
         # Only complete, successfully rotated bursts are queued.
         if len(captured_photos) == BURST_COUNT and successes == BURST_COUNT:
@@ -1087,6 +1077,9 @@ web_thread = threading.Thread(
     daemon=True
 )
 web_thread.start()
+
+# Generate thumbnails in a separate thread after each completed capture.
+catcam_thumbnails.start_worker()
 
 # Start background Google Vision processing.
 start_bird_detection_worker()

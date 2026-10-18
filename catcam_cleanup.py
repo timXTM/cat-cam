@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import catcam_stats
+import catcam_thumbnails
 
 BASE_DIR = Path('/home/pi/wildlife').resolve()
 RETENTION = timedelta(hours=24)
@@ -88,8 +89,15 @@ def cleanup_once(dry_run=False):
                     UPDATE events SET deleted=1, deleted_at=?
                     WHERE id=? AND classification='no_bird' AND deleted=0
                 ''', (datetime.now(timezone.utc).isoformat(), event_id))
+            # Once originals and DB status are handled, remove their cached
+            # previews too. Cache failures do not undo successful photo cleanup.
+            try:
+                thumb_count = catcam_thumbnails.delete_event_thumbnails(folder)
+            except (OSError, ValueError):
+                logging.exception('Thumbnail cleanup failed for event %s', event_id)
+                thumb_count = 0
             removed += 1
-            print(f'Deleted six non-bird photos for event {event_id}', flush=True)
+            print(f'Deleted six non-bird photos and {thumb_count} thumbnails for event {event_id}', flush=True)
         except OSError:
             logging.exception('Cleanup failed for event %s; will not delete other files', event_id)
     return removed
