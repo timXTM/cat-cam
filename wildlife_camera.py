@@ -419,21 +419,25 @@ class CatCamHandler(BaseHTTPRequestHandler):
             if not event_dir.is_dir():
                 self.send_error(404); return
             photos=sorted(event_dir.glob("*.jpg"))
-            images="".join(
-                f'<a href="/photo/{date_name}/{event_name}/{p.name}">'
-                f'<img loading="lazy" src="/photo/{date_name}/{event_name}/{p.name}" alt="{p.name}"></a>'
-                for p in photos
-            )
-            page=f"""<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CatCam event</title><style>
-body{{background:#111;color:#eee;font-family:system-ui,sans-serif;margin:0}}
-main{{max-width:1100px;margin:auto;padding:14px}} a{{color:#ddd}}
-.gallery{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}}
-.gallery img{{width:100%;height:auto;border-radius:6px}}
-</style></head><body><main><p><a href="/">← CatCam</a></p>
-<h1>{date_name} {event_name.replace("-",":")}</h1>
-<div class="gallery">{images}</div></main></body></html>"""
+            # Use the same navigation, appearance, and browser-local dark-mode
+            # preference as the main dashboard. The template builds photo cards
+            # client-side; JSON is escaped so filenames cannot inject markup.
+            try:
+                template = (Path(__file__).resolve().parent / "catcam_event.html").read_text(encoding="utf-8")
+            except OSError as exc:
+                print(f"Event template unavailable: {exc}", flush=True)
+                self.send_error(503, "Event template unavailable")
+                return
+            event_data = {
+                "date": date_name,
+                "event": event_name,
+                "photos": [
+                    {"url": f"/photo/{date_name}/{event_name}/{p.name}"}
+                    for p in photos
+                ],
+            }
+            payload = json.dumps(event_data, ensure_ascii=True).replace("<", "\\u003c")
+            page = template.replace("__CATCAM_EVENT_DATA__", payload)
             self.send_body(200,page,"text/html; charset=utf-8")
             return
 

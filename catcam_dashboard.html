@@ -219,7 +219,7 @@ async function loadStatistics(){
     const data=await response.json();
     statsGrid.replaceChildren();
     for(const [key,label,icon] of statFields){
-      const card=document.createElement("div");card.className="stat-card";
+      const card=document.createElement("div");card.className="card stat-card";
       const glyph=document.createElement("div");glyph.className="stat-icon";glyph.textContent=icon;
       const value=document.createElement("div");value.className="stat-value";
       value.textContent=key==="api_requests"?`${Number(data.summary[key]||0).toLocaleString()} / ${Number(data.summary.api_limit||900).toLocaleString()}`:Number(data.summary[key]||0).toLocaleString();
@@ -263,7 +263,9 @@ function showTab(tab){
   localStorage.setItem("catcam-tab",tab);
 }
 tabs.forEach(btn=>btn.addEventListener("click",()=>showTab(btn.dataset.tab)));
-showTab(localStorage.getItem("catcam-tab")||"dashboard");
+// Explicit deep links from event pages override the last-opened tab.
+const requestedTab=new URLSearchParams(location.search).get("tab");
+showTab(requestedTab||localStorage.getItem("catcam-tab")||"dashboard");
 const orientationButtons=[...document.querySelectorAll("[data-orientation]")];
 function setOrientation(mode){
   if(!["portrait","wide"].includes(mode))mode="portrait";
