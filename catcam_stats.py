@@ -235,7 +235,7 @@ def get_dashboard_data(limit=10):
             FROM events
         """).fetchone()
         recent_rows = conn.execute("""
-            SELECT timestamp, trigger_source, classification,
+            SELECT timestamp, folder, trigger_source, classification,
                    COALESCE(photo_count,0) AS photo_count,
                    COALESCE(bird_photo_count,0) AS bird_photo_count,
                    COALESCE(discord_status,'unknown') AS discord_status
