@@ -12,6 +12,7 @@ import catcam_stats
 import bird_detection
 import catcam_cleanup
 import catcam_thumbnails
+import catcam_advanced
 import json
 from urllib.parse import urlparse, unquote, parse_qs
 from pathlib import Path
@@ -256,6 +257,23 @@ class CatCamHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/advanced-settings":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 8192:
+                    raise ValueError("Invalid request size")
+                data = json.loads(self.rfile.read(length).decode("utf-8"))
+                if not isinstance(data, dict):
+                    raise ValueError("Expected settings object")
+                values = catcam_advanced.update(data.get('settings', {}), reset=data.get('reset') is True)
+                self.send_body(200, json.dumps({'ok': True, 'settings': values}), 'application/json; charset=utf-8')
+            except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                self.send_body(400, json.dumps({'ok': False, 'message': str(exc)}), 'application/json; charset=utf-8')
+            except OSError as exc:
+                print(f'Advanced settings save failed: {exc}', flush=True)
+                self.send_body(500, json.dumps({'ok': False, 'message': 'Unable to save settings'}), 'application/json; charset=utf-8')
+            return
+
         if path == "/settings":
             try:
                 length = int(self.headers.get("Content-Length", "0"))
@@ -346,7 +364,7 @@ class CatCamHandler(BaseHTTPRequestHandler):
                     self.wfile.write(jpeg)
                     self.wfile.write(b"\\r\\n")
                     self.wfile.flush()
-                    time.sleep(WEB_FRAME_INTERVAL)
+                    time.sleep(catcam_advanced.get("preview_interval"))
             except (BrokenPipeError, ConnectionResetError):
                 pass
             finally:
@@ -354,6 +372,10 @@ class CatCamHandler(BaseHTTPRequestHandler):
                     active_web_viewers=max(0,active_web_viewers-1)
                     count=active_web_viewers
                 print(f"Live-view viewer disconnected ({count} active)", flush=True)
+            return
+
+        if path == "/api/advanced-settings":
+            self.send_body(200, json.dumps({'settings': catcam_advanced.get()}), 'application/json; charset=utf-8')
             return
 
         if path == "/api/settings":
@@ -660,7 +682,7 @@ def send_discord_notification(
 
     # Check the toggle at every event.
 
-    if not DISCORD_TOGGLE.exists():
+    if not catcam_advanced.get("discord_enabled") or not DISCORD_TOGGLE.exists():
 
         print(
             "Discord notification skipped: "
@@ -850,7 +872,7 @@ def capture_full_resolution_burst(event_dir):
             )
 
             if i < BURST_COUNT:
-                time.sleep(BURST_INTERVAL)
+                time.sleep(catcam_advanced.get("burst_interval"))
 
     finally:
         back_start = time.monotonic()
@@ -935,7 +957,7 @@ def bird_detection_worker():
                     error='Bird photo classifications missing or files absent'
                 )
                 continue
-            if not DISCORD_TOGGLE.exists():
+            if not catcam_advanced.get("discord_enabled") or not DISCORD_TOGGLE.exists():
                 catcam_stats.update_event(event_id, discord_status='disabled')
                 print(f'Event {event_id}: Discord disabled', flush=True)
                 continue
@@ -1118,7 +1140,7 @@ try:
             current_roi=gray[roi_y1:roi_y2,roi_x1:roi_x2]
             previous_roi=previous[roi_y1:roi_y2,roi_x1:roi_x2]
             diff=np.abs(current_roi-previous_roi)
-            changed_pixels=np.count_nonzero(diff>PIXEL_DIFF_THRESHOLD)
+            changed_pixels=np.count_nonzero(diff>catcam_advanced.get("pixel_difference"))
             changed_percent=changed_pixels/roi_pixels*100
 
             with current_motion_lock:
@@ -1139,7 +1161,8 @@ try:
         motion_trigger=(
             previous is not None
             and changed_percent>=motion_threshold
-            and now-last_trigger>=COOLDOWN
+            and now-last_trigger>=catcam_advanced.get("capture_cooldown")
+            and catcam_advanced.get("motion_enabled")
         )
 
         if manual_trigger or motion_trigger:
@@ -1164,7 +1187,7 @@ try:
                 request.release()
 
         previous=gray.copy()
-        time.sleep(SAMPLE_INTERVAL)
+        time.sleep(catcam_advanced.get("sample_interval"))
 
 except KeyboardInterrupt:
     print("\nStopping wildlife camera.",flush=True)

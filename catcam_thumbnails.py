@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 
 from PIL import Image
+import catcam_advanced
 
 CACHE_DIR = Path('/home/pi/catcam_data/thumbnails')
 MAX_SIZE = (420, 420)
@@ -36,6 +37,7 @@ def ensure_thumbnail(photo):
     photo = Path(photo)
     cache_file = thumbnail_path(photo)
     source_stat = photo.stat()
+    # Existing thumbnails are reusable; changed quality/size applies to new ones.
     if cache_file.is_file() and cache_file.stat().st_mtime_ns >= source_stat.st_mtime_ns:
         return cache_file
 
@@ -43,10 +45,10 @@ def ensure_thumbnail(photo):
     temporary = cache_file.with_name(cache_file.name + f'.{threading.get_ident()}.tmp')
     try:
         with Image.open(photo) as source:
-            source.thumbnail(MAX_SIZE, Image.Resampling.LANCZOS)
+            source.thumbnail((catcam_advanced.get("thumbnail_max_size"),) * 2, Image.Resampling.LANCZOS)
             if source.mode != 'RGB':
                 source = source.convert('RGB')
-            source.save(temporary, format='JPEG', quality=JPEG_QUALITY)
+            source.save(temporary, format='JPEG', quality=catcam_advanced.get("thumbnail_quality"))
         # Set thumbnail mtime to source mtime so subsequent requests are cached.
         os.utime(temporary, ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns))
         os.replace(temporary, cache_file)

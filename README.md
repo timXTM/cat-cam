@@ -181,3 +181,24 @@ journalctl -u catcam.service -n 50 --no-pager
 **Awaiting field verification:** A naturally occurring bird-positive event, including the exact images delivered to Discord.
 
 **Not yet implemented:** Reliable bird species identification and species-level statistics.
+
+## Expanded settings page (October 2026)
+
+The Settings tab groups controls into **Camera & focus**, **Motion detection**, **Capture timing**, **Bird detection & notifications**, **Storage & cleanup**, **Thumbnails & live preview**, **Appearance**, and **Protected system settings**.
+
+The dashboard continues to provide live ROI editing, motion percentage threshold, autofocus, and manual focus. The Settings tab adds these **persistent, live-adjustable** controls:
+
+| Group | Settings | Default |
+| --- | --- | --- |
+| Motion detection | Enable automatic motion capture; pixel difference threshold; motion sampling interval; cooldown | On; 20; 0.25 s; 5 s |
+| Capture timing | Delay between photos in a six-photo burst | 0.4 s |
+| Notifications | Enable/disable Discord alerts | On (also requires existing Pi-side toggle and webhook) |
+| Storage & cleanup | Enable cleanup; non-bird retention; cleanup check interval | On; 24 h; 15 min |
+| Thumbnails | Maximum thumbnail dimension; JPEG quality | 420 px; 72 |
+| Live preview | Browser MJPEG frame interval | 0.5 s |
+
+Advanced settings are saved atomically in `/home/pi/catcam_advanced_settings.json` and validated on the server. The original ROI/focus settings remain in `/home/pi/catcam_settings.json`. Settings persist through service restarts. The advanced settings page has Save, Discard, and Restore Defaults controls. Restoring defaults requires confirmation.
+
+**Safety constraints:** The burst count stays fixed at six, because database classification and deletion safety checks currently require exactly six images. The Google Vision monthly API quota and bird-only Discord filter remain fixed; credentials are not shown in the browser. Photo orientation is fixed. The thumbnail size/quality controls affect newly generated thumbnails; existing cached thumbnails are reused. Reducing retention may make previously classified non-bird bursts immediately eligible for deletion at the next cleanup pass, including synchronized deletions via Syncthing. Disabling motion capture does not disable manual capture. Disabling Discord notifications does not disable classification. Disabling cleanup does not delete anything. Changes to cleanup check interval take effect after the current worker sleep finishes.
+
+**Deployment:** Copy `wildlife_camera_settings.py` to `wildlife_camera.py`, `catcam_cleanup_settings.py` to `catcam_cleanup.py`, `catcam_thumbnails_settings.py` to `catcam_thumbnails.py`, `catcam_dashboard_settings.html` to `catcam_dashboard.html`, and add `catcam_advanced.py`. Update this README. Commit/push, then on the Pi run `git pull --ff-only origin main` and `python3 -m py_compile wildlife_camera.py catcam_advanced.py catcam_cleanup.py catcam_thumbnails.py` before restarting `catcam.service`.

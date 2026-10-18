@@ -11,6 +11,7 @@ from pathlib import Path
 
 import catcam_stats
 import catcam_thumbnails
+import catcam_advanced
 
 BASE_DIR = Path('/home/pi/wildlife').resolve()
 RETENTION = timedelta(hours=24)
@@ -20,7 +21,7 @@ EXPECTED_PHOTOS = tuple(f'{i:02d}.jpg' for i in range(1, 7))
 
 def eligible_events(now=None):
     now = now or datetime.now(timezone.utc)
-    cutoff = (now - RETENTION).isoformat()
+    cutoff = (now - timedelta(hours=catcam_advanced.get("retention_hours"))).isoformat()
     with catcam_stats.connect() as conn:
         return conn.execute('''
             SELECT e.id, e.timestamp, e.folder
@@ -107,10 +108,11 @@ def cleanup_worker():
     print('Non-bird photo cleanup started (24h retention, 15m checks)', flush=True)
     while True:
         try:
-            cleanup_once()
+            if catcam_advanced.get("cleanup_enabled"):
+                cleanup_once()
         except Exception:
             logging.exception('CatCam cleanup error')
-        time.sleep(CHECK_INTERVAL)
+        time.sleep(catcam_advanced.get("cleanup_interval_minutes") * 60)
 
 
 if __name__ == '__main__':
