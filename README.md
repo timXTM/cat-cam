@@ -7,6 +7,7 @@ A Raspberry Pi wildlife camera that captures motion-triggered photo bursts, prov
 - Raspberry Pi Zero W
 - Arducam 12 MP IMX708 autofocus camera
 - Raspberry Pi Zero camera ribbon cable
+- 3D-printed enclosure: [Thingiverse design #4375297](https://www.thingiverse.com/thing:4375297)
 
 ## Features
 
