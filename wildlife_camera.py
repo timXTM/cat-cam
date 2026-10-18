@@ -8,6 +8,8 @@ import os
 import io
 import socket
 import threading
+import catcam_stats
+import bird_detection
 import json
 from urllib.parse import urlparse, unquote, parse_qs
 from pathlib import Path
@@ -1041,6 +1043,134 @@ def capture_full_resolution_burst(event_dir):
     )
 
 
+
+# ============================================================
+# Background bird classification
+# ============================================================
+
+def bird_detection_worker():
+    """
+    Process completed, pending capture events.
+
+    SQLite is the persistent queue. Events survive reboots.
+
+    Classification errors are recorded without deleting photos.
+    Failed events are not automatically retried.
+    """
+
+    print("Bird detection worker started", flush=True)
+
+    while True:
+        try:
+            with catcam_stats.connect() as conn:
+                rows = conn.execute("""
+                    SELECT id, folder, photo_count
+                    FROM events
+                    WHERE classification = 'pending'
+                      AND photo_count > 0
+                    ORDER BY id
+                    LIMIT 1
+                """).fetchall()
+
+            if not rows:
+                time.sleep(5)
+                continue
+
+            event_id, folder, expected_count = rows[0]
+            event_dir = Path(folder)
+
+            photos = sorted(event_dir.glob("*.jpg"))
+
+            # Do not classify incomplete or missing bursts.
+            if len(photos) != expected_count:
+                catcam_stats.update_event(
+                    event_id,
+                    classification="error",
+                    error="Photograph count mismatch"
+                )
+                continue
+
+            # Claim this event before making API requests.
+            # An interrupted event is recovered at startup.
+            catcam_stats.update_event(
+                event_id,
+                classification="processing"
+            )
+
+            print(
+                f"Analyzing event {event_id}: {event_dir}",
+                flush=True
+            )
+
+            result = bird_detection.detect_burst(photos)
+
+            if result["complete"]:
+                catcam_stats.update_event(
+                    event_id,
+                    classification=result["classification"],
+                    bird_photo_count=len(result["bird_photos"]),
+                    error=None
+                )
+
+                print(
+                    f"Event {event_id}: "
+                    f"{result['classification']} "
+                    f"({len(result['bird_photos'])} bird photos)",
+                    flush=True
+                )
+
+            else:
+                errors = "; ".join(
+                    item["error"]
+                    for item in result["errors"]
+                )
+
+                catcam_stats.update_event(
+                    event_id,
+                    classification="error",
+                    bird_photo_count=len(result["bird_photos"]),
+                    error=errors or "Incomplete classification"
+                )
+
+                print(
+                    f"Event {event_id}: classification incomplete",
+                    flush=True
+                )
+
+        except Exception as exc:
+            print(
+                f"Bird detection worker error: {exc}",
+                flush=True
+            )
+            time.sleep(10)
+
+
+def recover_interrupted_classifications():
+    """
+    Restore events interrupted by a service restart.
+
+    They will be classified again. Previously submitted
+    requests may be repeated, so API usage is reserved again.
+    """
+    with catcam_stats.connect() as conn:
+        conn.execute("""
+            UPDATE events
+            SET classification = 'pending'
+            WHERE classification = 'processing'
+        """)
+
+
+def start_bird_detection_worker():
+    recover_interrupted_classifications()
+
+    worker = threading.Thread(
+        target=bird_detection_worker,
+        daemon=True,
+        name="CatCamBirdDetection"
+    )
+
+    worker.start()
+
 def run_capture_event(changed_percent, trigger_source):
     global camera_busy
 
@@ -1053,6 +1183,14 @@ def run_capture_event(changed_percent, trigger_source):
         event_timestamp=datetime.now()
         event_dir=BASE_DIR/event_timestamp.strftime("%Y-%m-%d")/event_timestamp.strftime("%H-%M-%S")
         event_dir.mkdir(parents=True,exist_ok=True)
+
+        # Record every accepted capture trigger.
+        # This persists even if photographs are later deleted.
+        event_id = catcam_stats.record_trigger(
+            trigger_source,
+            changed_percent,
+            event_dir
+        )
 
         print(f"{trigger_source.upper()} TRIGGER: {changed_percent:.2f}% ROI motion",flush=True)
         print(f"Event folder: {event_dir}",flush=True)
@@ -1076,6 +1214,22 @@ def run_capture_event(changed_percent, trigger_source):
             if rotate_photo(photo): successes+=1
         print(f"Rotation complete: {successes}/{len(captured_photos)} successful",flush=True)
 
+        # The background worker picks up this event from SQLite.
+        # Only complete, successfully rotated bursts are queued.
+        if len(captured_photos) == BURST_COUNT and successes == BURST_COUNT:
+            catcam_stats.update_event(
+                event_id,
+                photo_count=len(captured_photos),
+                classification="pending"
+            )
+        else:
+            catcam_stats.update_event(
+                event_id,
+                photo_count=len(captured_photos),
+                classification="error",
+                error="Incomplete capture or rotation failure"
+            )
+
         send_discord_notification(
             captured_photos,event_dir,changed_percent,event_timestamp
         )
@@ -1093,6 +1247,9 @@ web_thread = threading.Thread(
     daemon=True
 )
 web_thread.start()
+
+# Start background Google Vision processing.
+start_bird_detection_worker()
 
 # ============================================================
 # Motion detection loop
