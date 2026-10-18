@@ -399,7 +399,7 @@ class CatCamHandler(BaseHTTPRequestHandler):
                                 "date":date_dir.name,
                                 "event":event_dir.name,
                                 "count":len(photos),
-                                "preview":f"/photo/{date_dir.name}/{event_dir.name}/{photos[0].name}"
+                                "preview":f"/thumb/{date_dir.name}/{event_dir.name}/{photos[0].name}"
                             })
                         if len(events)>=GALLERY_EVENT_LIMIT: break
                     if len(events)>=GALLERY_EVENT_LIMIT: break
@@ -432,7 +432,8 @@ class CatCamHandler(BaseHTTPRequestHandler):
                 "date": date_name,
                 "event": event_name,
                 "photos": [
-                    {"url": f"/photo/{date_name}/{event_name}/{p.name}"}
+                    {"url": f"/photo/{date_name}/{event_name}/{p.name}",
+                     "thumb": f"/thumb/{date_name}/{event_name}/{p.name}"}
                     for p in photos
                 ],
             }
@@ -441,7 +442,7 @@ class CatCamHandler(BaseHTTPRequestHandler):
             self.send_body(200,page,"text/html; charset=utf-8")
             return
 
-        if path.startswith("/photo/"):
+        if path.startswith("/photo/") or path.startswith("/thumb/"):
             parts=path.split("/")
             if len(parts)!=5:
                 self.send_error(404); return
@@ -470,13 +471,41 @@ class CatCamHandler(BaseHTTPRequestHandler):
                 self.send_error(404)
                 return
 
+            # The gallery requests small cached previews. Full-size JPEGs are
+            # transferred only when the visitor opens the enlarged viewer.
+            image_to_send = photo
+            if path.startswith("/thumb/"):
+                cache_file = (Path("/home/pi/catcam_data/thumbnails") /
+                              date_name / event_name / filename)
+                try:
+                    original_stat = photo.stat()
+                    if (not cache_file.is_file() or
+                            cache_file.stat().st_mtime_ns < original_stat.st_mtime_ns):
+                        cache_file.parent.mkdir(parents=True, exist_ok=True)
+                        temporary = cache_file.with_name(
+                            cache_file.name + f".{threading.get_ident()}.tmp")
+                        try:
+                            with Image.open(photo) as source:
+                                source.thumbnail((420, 420), Image.Resampling.LANCZOS)
+                                if source.mode != "RGB":
+                                    source = source.convert("RGB")
+                                source.save(temporary, format="JPEG", quality=72)
+                            os.replace(temporary, cache_file)
+                        finally:
+                            temporary.unlink(missing_ok=True)
+                    image_to_send = cache_file
+                except (OSError, ValueError) as exc:
+                    print(f"Thumbnail generation failed: {exc}", flush=True)
+                    self.send_error(500, "Thumbnail unavailable")
+                    return
+
             try:
                 self.send_response(200)
                 self.send_header("Content-Type","image/jpeg")
-                self.send_header("Content-Length",str(photo.stat().st_size))
+                self.send_header("Content-Length",str(image_to_send.stat().st_size))
                 self.send_header("Cache-Control","private, max-age=3600")
                 self.end_headers()
-                with open(photo,"rb") as f:
+                with open(image_to_send,"rb") as f:
                     while True:
                         chunk=f.read(65536)
                         if not chunk: break
