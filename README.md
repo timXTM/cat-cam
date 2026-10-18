@@ -24,6 +24,24 @@ A Raspberry Pi wildlife camera that captures motion-triggered photo bursts, prov
 - Persistent camera settings
 - Automatic startup through `systemd`
 
+
+### Physical mounting and output orientation
+
+The camera module is currently mounted sideways to photograph a portrait-oriented scene. CatCam corrects the sensor image by rotating the live MJPEG preview and each **newly captured** full-resolution JPEG. The default is a **90° clockwise output rotation**, preserving the existing installation.
+
+In **Settings → Camera mounting & image orientation**, select the physical mounting position: **normal (0°)**, **sideways clockwise (270°)**, **sideways counterclockwise (90°)**, or **upside down (180°)**. An advanced rotation override permits 0°, 90°, 180°, or 270° regardless of the mounting selection. These are output corrections, not physical camera controls. If a sideways selection produces an upside-down image, choose the opposite sideways position or override the rotation.
+
+- To switch to landscape photography, **physically rotate the camera module** so its sensor is in landscape orientation, then select **Normal — landscape** (0°) and save.
+- Changing orientation immediately updates the live preview and ROI overlay, and affects **future captures only**. Previously saved JPEGs and their cached thumbnails are not changed.
+- Motion ROI coordinates remain in the **native, unrotated 320×240 sensor frame**. The dashboard transforms the overlay and drag/resize coordinates to match 0°, 90°, 180°, or 270° previews. Changing output rotation does not change the region monitored by motion detection.
+- For each six-photo burst, the selected rotation is read once after the burst completes and is applied consistently to all six photographs. At 0°, no JPEG transformation is needed. At 90°, 180°, or 270°, `jpegtran` rotates the saved JPEGs before thumbnails or bird classification are queued.
+- Output aspect ratio is landscape (4:3 live preview) at 0°/180° and portrait (3:4) at 90°/270°. Saved full-resolution files have correspondingly swapped dimensions when rotated by 90°/270°.
+- Orientation preferences are persisted in `/home/pi/catcam_advanced_settings.json`; the browser's **Portrait/Wide layout** switch is separate and does not rotate images.
+
+**Safety:** Changing mounting/rotation during an active capture is discouraged. Test the live preview and manually trigger a new capture after remounting. The preview and capture rotation are software transformations; they do not change lens field of view or camera sensor orientation.
+
+Reference: [Raspberry Pi Picamera2 manual](https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf).
+
 ### Bird detection and Discord notifications
 
 - Background bird detection using Google Cloud Vision Label Detection
@@ -202,3 +220,20 @@ Advanced settings are saved atomically in `/home/pi/catcam_advanced_settings.jso
 **Safety constraints:** The burst count stays fixed at six, because database classification and deletion safety checks currently require exactly six images. The Google Vision monthly API quota and bird-only Discord filter remain fixed; credentials are not shown in the browser. Photo orientation is fixed. The thumbnail size/quality controls affect newly generated thumbnails; existing cached thumbnails are reused. Reducing retention may make previously classified non-bird bursts immediately eligible for deletion at the next cleanup pass, including synchronized deletions via Syncthing. Disabling motion capture does not disable manual capture. Disabling Discord notifications does not disable classification. Disabling cleanup does not delete anything. Changes to cleanup check interval take effect after the current worker sleep finishes.
 
 **Deployment:** Copy `wildlife_camera_settings.py` to `wildlife_camera.py`, `catcam_cleanup_settings.py` to `catcam_cleanup.py`, `catcam_thumbnails_settings.py` to `catcam_thumbnails.py`, `catcam_dashboard_settings.html` to `catcam_dashboard.html`, and add `catcam_advanced.py`. Update this README. Commit/push, then on the Pi run `git pull --ff-only origin main` and `python3 -m py_compile wildlife_camera.py catcam_advanced.py catcam_cleanup.py catcam_thumbnails.py` before restarting `catcam.service`.
+
+
+## Contextual Settings help and sources (October 2026)
+
+The Settings tab includes expandable **ⓘ What does this setting do?** explanations for each advanced setting, plus Camera & focus, Appearance, and Protected system settings. Each explanation describes the effect **in CatCam**, and links to a relevant technical reference in a new browser tab. Explanations are embedded locally in `catcam_dashboard.html`, so viewing help does not require an internet connection; opening the external reference does. No Python modules, API endpoints, capture settings, or deletion rules are changed by this documentation-only update.
+
+Primary references:
+
+- Raspberry Pi Picamera2 manual (focus, lens position, camera controls): https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf
+- OpenCV image thresholding concepts (motion pixel threshold): https://docs.opencv.org/4.x/db/d8e/tutorial_threshold.html
+- Python time module (timing concepts): https://docs.python.org/3/library/time.html
+- Discord webhooks: https://discord.com/developers/docs/resources/webhook
+- Pillow thumbnail and JPEG documentation: https://pillow.readthedocs.io/en/stable/reference/Image.html#PIL.Image.Image.thumbnail and https://pillow.readthedocs.io/en/stable/handbook/image-file-formats.html#jpeg
+- Google Cloud Vision quotas: https://docs.cloud.google.com/vision/quotas
+- CatCam implementation-specific behavior: https://github.com/timXTM/cat-cam
+
+**Note:** Generic references explain underlying concepts, not necessarily CatCam's exact algorithms. For instance, CatCam's monthly 900-call limit is an application-level safety limit, not a Google Cloud quota.

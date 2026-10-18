@@ -18,6 +18,8 @@ DEFAULTS = {
     'thumbnail_max_size': 420,
     'thumbnail_quality': 72,
     'preview_interval': 0.5,
+    'mounting_orientation': 'sideways_ccw',
+    'rotation_override': 'auto',
 }
 LIMITS = {
     'pixel_difference': (1, 255, int),
@@ -30,6 +32,8 @@ LIMITS = {
     'thumbnail_quality': (40, 95, int),
     'preview_interval': (0.25, 5, float),
 }
+MOUNTINGS = {'normal': 0, 'sideways_cw': 270, 'upside_down': 180, 'sideways_ccw': 90}
+OVERRIDES = {'auto', '0', '90', '180', '270'}
 BOOLEAN_KEYS = {'motion_enabled', 'discord_enabled', 'cleanup_enabled'}
 _lock = threading.RLock()
 _values = dict(DEFAULTS)
@@ -40,7 +44,11 @@ def validate(changes):
         raise ValueError('Settings must be an object')
     validated = {}
     for key, value in changes.items():
-        if key in BOOLEAN_KEYS:
+        if key == 'mounting_orientation':
+            if value not in MOUNTINGS: raise ValueError('Invalid mounting orientation')
+        elif key == 'rotation_override':
+            if value not in OVERRIDES: raise ValueError('Invalid rotation override')
+        elif key in BOOLEAN_KEYS:
             if type(value) is not bool:
                 raise ValueError(f'{key} must be true or false')
         elif key in LIMITS:
@@ -91,3 +99,10 @@ def load():
 
 
 load()
+
+
+def output_rotation():
+    """Clockwise rotation in degrees for the selected physical mounting."""
+    with _lock:
+        override = _values['rotation_override']
+        return MOUNTINGS[_values['mounting_orientation']] if override == 'auto' else int(override)

@@ -153,7 +153,7 @@ load_settings()
 # rotation after each photograph is captured.
 
 JPEGTRAN = "/usr/bin/jpegtran"
-ROTATE_DEGREES = "90"
+# Rotation is read from catcam_advanced.output_rotation() at runtime.
 
 
 # ============================================================
@@ -556,7 +556,13 @@ def update_web_frame(rgb_frame):
 
     try:
         image = Image.fromarray(rgb_frame.astype(np.uint8), "RGB")
-        image = image.transpose(Image.Transpose.ROTATE_270)
+        rotation = catcam_advanced.output_rotation()
+        if rotation:
+            image = image.transpose({
+                90: Image.Transpose.ROTATE_270,
+                180: Image.Transpose.ROTATE_180,
+                270: Image.Transpose.ROTATE_90,
+            }[rotation])
 
         buffer = io.BytesIO()
         image.save(buffer, format="JPEG", quality=72)
@@ -568,15 +574,18 @@ def update_web_frame(rgb_frame):
         print(f"Web preview error: {exc}", flush=True)
 
 
-def rotate_photo(photo):
+def rotate_photo(photo, degrees):
     """
-    Losslessly rotate one JPEG 90 degrees clockwise.
+    Apply the selected clockwise rotation to a saved JPEG.
 
     jpegtran writes to a temporary file first. Only after
     successful rotation is the original photograph replaced.
 
     If rotation fails, the original photograph is preserved.
     """
+
+    if degrees == 0:
+        return photo.is_file() and photo.stat().st_size > 0
 
     temp_photo = photo.with_name(
         photo.stem + ".rotating.jpg"
@@ -590,7 +599,7 @@ def rotate_photo(photo):
                 [
                     JPEGTRAN,
                     "-rotate",
-                    ROTATE_DEGREES,
+                    str(degrees),
                     "-copy",
                     "all",
                     str(photo)
@@ -1056,11 +1065,12 @@ def run_capture_event(changed_percent, trigger_source):
             flush=True
         )
 
-        print("Rotating photographs...",flush=True)
+        output_degrees = catcam_advanced.output_rotation()
+        print(f"Orienting photographs ({output_degrees}° clockwise)...", flush=True)
         successes=0
         for photo in captured_photos:
-            if rotate_photo(photo): successes+=1
-        print(f"Rotation complete: {successes}/{len(captured_photos)} successful",flush=True)
+            if rotate_photo(photo, output_degrees): successes+=1
+        print(f"Orientation complete: {successes}/{len(captured_photos)} successful",flush=True)
 
         # Queue thumbnail generation only after the six originals are fully
         # written and rotated. The worker runs independently of capture and
