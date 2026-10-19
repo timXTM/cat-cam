@@ -411,6 +411,48 @@ class CatCamHandler(BaseHTTPRequestHandler):
                                "application/json; charset=utf-8")
             return
 
+
+        if path == "/api/bird-activity":
+            try:
+                from urllib.parse import parse_qs
+                import catcam_activity
+
+                params = parse_qs(parsed.query)
+
+                def param(name):
+                    return params.get(name, [None])[0]
+
+                data = catcam_activity.get_activity(
+                    start=param("start"),
+                    end=param("end"),
+                    start_hour=param("start_hour"),
+                    end_hour=param("end_hour"),
+                    bird_type=param("bird_type"),
+                )
+
+                self.send_body(
+                    200,
+                    json.dumps(data),
+                    "application/json; charset=utf-8"
+                )
+
+            except ValueError as exc:
+                self.send_body(
+                    400,
+                    json.dumps({"error": str(exc)}),
+                    "application/json; charset=utf-8"
+                )
+
+            except Exception as exc:
+                print(f"Bird Activity API failed: {exc}", flush=True)
+                self.send_body(
+                    500,
+                    json.dumps({"error": "Bird Activity unavailable"}),
+                    "application/json; charset=utf-8"
+                )
+
+            return
+
         if path == "/api/events":
             events=[]
             if BASE_DIR.exists():
