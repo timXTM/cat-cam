@@ -301,6 +301,7 @@ async function loadStatistics(){
 // Appearance and navigation are browser-local preferences, not camera settings.
 const tabs=[...document.querySelectorAll("[data-tab]")];
 function showTab(tab){
+  if(tab==="gallery"){location.href="/gallery";return;}
   if(!["dashboard","gallery","settings"].includes(tab))tab="dashboard";
   document.querySelectorAll("[data-page]").forEach(el=>el.hidden=el.dataset.page!==tab);
   tabs.forEach(btn=>{const active=btn.dataset.tab===tab;btn.classList.toggle("active",active);btn.setAttribute("aria-current",active?"page":"false");});
@@ -309,7 +310,7 @@ function showTab(tab){
 tabs.forEach(btn=>btn.addEventListener("click",()=>showTab(btn.dataset.tab)));
 // Explicit deep links from event pages override the last-opened tab.
 const requestedTab=new URLSearchParams(location.search).get("tab");
-showTab(requestedTab||localStorage.getItem("catcam-tab")||"dashboard");
+showTab(requestedTab||((localStorage.getItem("catcam-tab")==="gallery")?"dashboard":localStorage.getItem("catcam-tab"))||"dashboard");
 const orientationButtons=[...document.querySelectorAll("[data-orientation]")];
 function setOrientation(mode){
   if(!["portrait","wide"].includes(mode))mode="portrait";

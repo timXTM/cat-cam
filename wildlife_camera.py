@@ -462,14 +462,32 @@ class CatCamHandler(BaseHTTPRequestHandler):
                 self.send_body(500, "Bird Activity page unavailable", "text/plain; charset=utf-8")
             return
 
-        if path in ("/bird-gallery", "/bird-gallery/"):
+        if path in ("/gallery", "/gallery/", "/bird-gallery", "/bird-gallery/"):
             try:
-                from pathlib import Path as _BirdGalleryPath
-                page = (_BirdGalleryPath(__file__).resolve().parent / "catcam_bird_gallery.html").read_text(encoding="utf-8")
+                page = (Path(__file__).resolve().parent / "catcam_gallery.html").read_text(encoding="utf-8")
                 self.send_body(200, page, "text/html; charset=utf-8")
             except Exception as exc:
-                print(f"Bird Gallery page failed: {exc}", flush=True)
-                self.send_body(500, "Bird Gallery unavailable", "text/plain; charset=utf-8")
+                print(f"Gallery page failed: {exc}", flush=True)
+                self.send_body(500, "Gallery unavailable", "text/plain; charset=utf-8")
+            return
+
+        if path == "/api/gallery":
+            try:
+                import catcam_gallery
+                q = parse_qs(parsed.query)
+                def arg(name, default=''):
+                    return q.get(name, [default])[0]
+                data = catcam_gallery.gallery(
+                    mode=arg('mode', 'all'), bird_type=arg('bird_type'),
+                    start=arg('start'), end=arg('end'),
+                    start_hour=arg('start_hour'), end_hour=arg('end_hour'),
+                    order=arg('order', 'newest'), page=arg('page', '1'))
+                self.send_body(200, json.dumps(data), "application/json; charset=utf-8")
+            except ValueError as exc:
+                self.send_body(400, json.dumps({'error': str(exc)}), "application/json; charset=utf-8")
+            except Exception as exc:
+                print(f"Gallery API failed: {exc}", flush=True)
+                self.send_body(500, json.dumps({'error': 'Gallery unavailable'}), "application/json; charset=utf-8")
             return
 
         if path == "/api/events":
