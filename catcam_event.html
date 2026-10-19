@@ -17,12 +17,14 @@
 const EVENT_DATA=__CATCAM_EVENT_DATA__;
 const {date,event,photos}=EVENT_DATA;
 const detection=EVENT_DATA.detection||{};
-const labels=(detection.bird_labels||[]).map(v=>typeof v==='string'?v:String(v));
+function labelNames(values){return (Array.isArray(values)?values:[]).map(v=>
+  typeof v==='string'?v:(v&&typeof v==='object'?String(v.name||v.description||''):'')).filter(Boolean)}
+const labels=labelNames(detection.bird_labels);
 const burstSummary=document.getElementById('burstDetection');
 if(detection.classification==='bird'){
   burstSummary.textContent=`🐦 Bird detected in photo ${detection.first_bird_photo||'?'}.`+
     (labels.length?' Google Vision labels: '+labels.join(', ')+'.':' No descriptive labels recorded.')+
-    ' The remaining photos after the first detection were not analyzed.';
+    (Object.keys(detection.photos||{}).length>1?'':' The remaining photos after the first detection were not analyzed.');
 }else if(detection.classification==='no_bird'){
   burstSummary.textContent='No bird detected. All six photos were analyzed.';
 }else{
@@ -44,7 +46,7 @@ photos.forEach((photo,index)=>{const button=document.createElement('button');but
   const result=detection.photos?.[photo.url.split('/').pop()];
   const detail=document.createElement('div');detail.className='photo-detection';
   if(result?.bird_detected){
-    detail.textContent='🐦 Bird detected · Google Vision labels: '+(labels.join(', ')||'None recorded');
+    detail.textContent='🐦 Bird detected · Google Vision labels: '+(labelNames(result.labels).join(', ')||labels.join(', ')||'None recorded');
   }else if(result?.checked){
     detail.textContent='Checked · No bird detected';
   }else if(detection.classification==='bird'){

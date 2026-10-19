@@ -279,6 +279,19 @@ def get_event_details(folder):
         }
     first = event['first_bird_photo']
     labels = json.loads(event['bird_labels_json'] or '[]')
+    # Normalize both legacy Google Vision dictionaries and new plain-string labels.
+    def label_name(value):
+        if isinstance(value, dict):
+            return str(value.get('name') or value.get('description') or '').strip()
+        if isinstance(value, (list, tuple)):
+            return label_name(value[0]) if value else ''
+        return str(value).strip() if value is not None else ''
+
+    def normalize_labels(values):
+        if not isinstance(values, list):
+            return []
+        return [name for value in values if (name := label_name(value))]
+
     # Existing bird events predate the new metadata columns.
     if first is None:
         positive = sorted(name for name, result in photo_data.items() if result['bird_detected'])
@@ -286,9 +299,13 @@ def get_event_details(folder):
             first = int(Path(positive[0]).stem)
             if not labels:
                 labels = photo_data[positive[0]]['labels']
+    # The API always exposes readable names, not raw dict objects.
+    # Per-photo labels are independent: old bursts may have several checked photos.
+    for result in photo_data.values():
+        result['labels'] = normalize_labels(result['labels'])
     return {
         'classification': event['classification'],
         'first_bird_photo': first,
-        'bird_labels': labels,
+        'bird_labels': normalize_labels(labels),
         'photos': photo_data
     }

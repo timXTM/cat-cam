@@ -201,7 +201,7 @@ function makeCaptureCard(e){
   const det=e.detection||{};
   if(det.classification==='bird'){
     const bird=document.createElement('span');
-    bird.textContent=`🐦 Bird detected in photo ${det.first_bird_photo || '?'}${det.bird_labels?.length?' · Google Vision: '+det.bird_labels.join(', '):''}`;
+    bird.textContent=`🐦 Bird detected in photo ${det.first_bird_photo || '?'}${det.bird_labels?.length?' · Google Vision: '+(det.bird_labels||[]).map(v=>typeof v==='string'?v:(v&&typeof v==='object'?(v.name||v.description||''):'')).filter(Boolean).join(', '):''}`;
     info.append(bird);
   }else if(det.classification==='no_bird'){
     const noBird=document.createElement('span');noBird.textContent='No bird detected';info.append(noBird);
