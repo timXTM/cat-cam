@@ -463,6 +463,16 @@ class CatCamHandler(BaseHTTPRequestHandler):
                 self.send_body(500, "Bird Activity page unavailable", "text/plain; charset=utf-8")
             return
 
+        if path in ("/bird-gallery", "/bird-gallery/"):
+            try:
+                from pathlib import Path as _BirdGalleryPath
+                page = (_BirdGalleryPath(__file__).resolve().parent / "catcam_bird_gallery.html").read_text(encoding="utf-8")
+                self.send_body(200, page, "text/html; charset=utf-8")
+            except Exception as exc:
+                print(f"Bird Gallery page failed: {exc}", flush=True)
+                self.send_body(500, "Bird Gallery unavailable", "text/plain; charset=utf-8")
+            return
+
         if path == "/api/events":
             events=[]
             if BASE_DIR.exists():
