@@ -197,14 +197,25 @@ function makeCaptureCard(e){
   const info=document.createElement("div");info.className="capture-info";
   const time=document.createElement("strong");time.textContent=`${e.date}  ${e.event.replaceAll("-",":")}`;
   const note=document.createElement("span");note.textContent=`${e.count} photos · Open burst →`;
-  info.append(time,note);a.append(img,info);return a;
+  info.append(time,note);
+  const det=e.detection||{};
+  if(det.classification==='bird'){
+    const bird=document.createElement('span');
+    bird.textContent=`🐦 Bird detected in photo ${det.first_bird_photo || '?'}${det.bird_labels?.length?' · Google Vision: '+det.bird_labels.join(', '):''}`;
+    info.append(bird);
+  }else if(det.classification==='no_bird'){
+    const noBird=document.createElement('span');noBird.textContent='No bird detected';info.append(noBird);
+  }else if(det.classification==='pending'||det.classification==='processing'||det.classification==='error'){
+    const pending=document.createElement('span');pending.textContent='Classification '+det.classification;info.append(pending);
+  }
+  a.append(img,info);return a;
 }
 function renderEvents(){
   eventsEl.replaceChildren();
   const filtered=recentEvents.filter(e=>{
     if(galleryFilter==="all")return true;
-    const rec=recentDbEvents.find(r=>r.folder && r.folder.endsWith("/"+eventKey(e)));
-    return rec && (galleryFilter==="bird"?rec.classification==="bird":rec.classification==="no_bird");
+    const classification=e.detection?.classification;
+    return galleryFilter==="bird"?classification==="bird":classification==="no_bird";
   });
   if(!filtered.length){eventsEl.textContent=galleryFilter==="all"?"No captures yet.":"No matching recent captures.";return;}
   filtered.forEach(e=>eventsEl.appendChild(makeCaptureCard(e)));

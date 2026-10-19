@@ -422,7 +422,8 @@ class CatCamHandler(BaseHTTPRequestHandler):
                                 "date":date_dir.name,
                                 "event":event_dir.name,
                                 "count":len(photos),
-                                "preview":f"/thumb/{date_dir.name}/{event_dir.name}/{photos[0].name}"
+                                "preview":f"/thumb/{date_dir.name}/{event_dir.name}/{photos[0].name}",
+                                "detection":catcam_stats.get_event_details(event_dir)
                             })
                         if len(events)>=GALLERY_EVENT_LIMIT: break
                     if len(events)>=GALLERY_EVENT_LIMIT: break
@@ -454,6 +455,7 @@ class CatCamHandler(BaseHTTPRequestHandler):
             event_data = {
                 "date": date_name,
                 "event": event_name,
+                "detection": catcam_stats.get_event_details(event_dir),
                 "photos": [
                     {"url": f"/photo/{date_name}/{event_name}/{p.name}",
                      "thumb": f"/thumb/{date_name}/{event_name}/{p.name}"}
@@ -682,7 +684,9 @@ def send_discord_notification(
     photos,
     event_dir,
     motion_percent,
-    event_timestamp
+    event_timestamp,
+    first_bird_photo=None,
+    bird_labels=None
 ):
     """
     Send ONE Discord webhook message containing all six
@@ -715,11 +719,14 @@ def send_discord_notification(
         "%Y-%m-%d %I:%M:%S %p"
     )
 
+    labels_text = ", ".join(str(label) for label in (bird_labels or [])[:8]) or "No descriptive labels"
     message = (
-        f"CatCam motion detected\n"
+        f"CatCam bird detected\n"
         f"{timestamp_text}\n"
         f"ROI motion: {motion_percent:.1f}%\n"
-        f"{len(photos)} bird-positive photos detected\n"
+        f"Bird detected in photo {first_bird_photo or '?'}\n"
+        f"Google Vision labels: {labels_text}\n"
+        f"All {len(photos)} burst photos attached (only checked photos are classified).\n"
         f"Folder: {event_dir}"
     )
 
@@ -734,14 +741,14 @@ def send_discord_notification(
 
         for index, photo in enumerate(photos):
 
-            image_file = open(
-                photo,
-                "rb"
-            )
-
-            open_files.append(
-                image_file
-            )
+            # Send lightweight copies to Discord; never modify archived originals.
+            with Image.open(photo) as original:
+                copy = original.copy()
+                copy.thumbnail((1600, 1600))
+                image_file = io.BytesIO()
+                copy.convert('RGB').save(image_file, format='JPEG', quality=78, optimize=True)
+                image_file.seek(0)
+            open_files.append(image_file)
 
             files.append(
                 (
@@ -935,36 +942,68 @@ def bird_detection_worker():
                     continue
                 catcam_stats.update_event(event_id, classification='processing')
                 print(f'Analyzing event {event_id}: {event_dir}', flush=True)
-                result = bird_detection.detect_burst(photos)
-                catcam_stats.save_photo_detections(event_id, result['results'])
-                if not result['complete']:
-                    errors = '; '.join(e['error'] for e in result['errors'])
+                # Classify photos in order, stopping immediately after the first bird.
+                # Reuse the existing single-image Google Vision logic via detect_burst([photo]).
+                # The original classifier handles API reservation and its own bird threshold.
+                checked = []
+                detected_photo = None
+                classification_error = None
+                for photo in photos:
+                    result = bird_detection.detect_burst([photo])
+                    catcam_stats.save_photo_detections(event_id, result['results'])
+                    checked.extend(result['results'])
+                    if not result['complete']:
+                        classification_error = '; '.join(str(e.get('error', 'Vision error'))
+                                                          for e in result.get('errors', [])) or 'Incomplete classification'
+                        break
+                    if result['classification'] == 'bird':
+                        detected_photo = photo
+                        break
+                if classification_error:
                     catcam_stats.update_event(
                         event_id, classification='error',
-                        bird_photo_count=len(result['bird_photos']),
-                        error=errors or 'Incomplete classification'
+                        bird_photo_count=sum(bool(r['bird_detected']) for r in checked),
+                        error=classification_error
                     )
-                    print(f'Event {event_id}: classification incomplete', flush=True)
+                    print(f'Event {event_id}: classification incomplete: {classification_error}', flush=True)
                     continue
+                first_bird_photo = int(detected_photo.stem) if detected_photo else None
+                bird_result = next((r for r in checked if detected_photo and
+                                    Path(r['photo']) == detected_photo), None)
+                labels = (bird_result.get('labels') or bird_result.get('bird_labels') or []) if bird_result else []
+                # Google Vision labels may be strings or dictionaries depending on classifier.
+                label_names = []
+                for label in labels:
+                    if isinstance(label, dict):
+                        label_names.append(str(label.get('description') or label.get('name') or ''))
+                    elif isinstance(label, (list, tuple)):
+                        label_names.append(str(label[0]) if label else '')
+                    else:
+                        label_names.append(str(label))
+                label_names = [s for s in label_names if s][:12]
+                outcome = 'bird' if detected_photo else 'no_bird'
                 catcam_stats.update_event(
-                    event_id, classification=result['classification'],
-                    bird_photo_count=len(result['bird_photos']), error=None
+                    event_id, classification=outcome,
+                    bird_photo_count=1 if detected_photo else 0,
+                    first_bird_photo=first_bird_photo,
+                    bird_labels_json=json.dumps(label_names), error=None
                 )
-                print(
-                    f"Event {event_id}: {result['classification']} "
-                    f"({len(result['bird_photos'])} bird photos)", flush=True
-                )
-                if result['classification'] == 'no_bird':
+                print(f"Event {event_id}: {outcome} ({len(checked)}/{len(photos)} Vision calls)", flush=True)
+                if outcome == 'no_bird':
                     catcam_stats.update_event(event_id, discord_status='not_needed')
                     print(f'Event {event_id}: Discord skipped (no birds)', flush=True)
                     continue
 
-            bird_photos = catcam_stats.get_bird_photos(event_id)
-            if not bird_photos or not all(p.is_file() for p in bird_photos):
-                catcam_stats.update_event(
-                    event_id, discord_status='error',
-                    error='Bird photo classifications missing or files absent'
-                )
+            # A bird-positive burst is preserved in full; send all six original photos.
+            all_photos = sorted(event_dir.glob('*.jpg'))
+            if len(all_photos) != 6:
+                catcam_stats.update_event(event_id, discord_status='error',
+                                          error='Bird burst does not contain six photos')
+                continue
+            detection = catcam_stats.get_event_details(event_dir)
+            if not detection['first_bird_photo']:
+                catcam_stats.update_event(event_id, discord_status='error',
+                                          error='Confirmed bird photo number missing')
                 continue
             if not catcam_advanced.get("discord_enabled") or not DISCORD_TOGGLE.exists():
                 catcam_stats.update_event(event_id, discord_status='disabled')
@@ -988,12 +1027,14 @@ def bird_detection_worker():
             # Mark as sending first: a crash during upload may require manual review.
             catcam_stats.update_event(event_id, discord_status='sending')
             success = send_discord_notification(
-                bird_photos, event_dir, motion_percent or 0.0, event_timestamp
+                all_photos, event_dir, motion_percent or 0.0, event_timestamp,
+                first_bird_photo=detection['first_bird_photo'],
+                bird_labels=detection['bird_labels']
             )
             if success:
                 catcam_stats.update_event(
                     event_id, discord_sent=1,
-                    discord_photo_count=len(bird_photos), discord_status='sent'
+                    discord_photo_count=len(all_photos), discord_status='sent'
                 )
             else:
                 catcam_stats.update_event(event_id, discord_status='failed')

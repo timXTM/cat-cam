@@ -45,8 +45,8 @@ Reference: [Raspberry Pi Picamera2 manual](https://datasheets.raspberrypi.com/ca
 ### Bird detection and Discord notifications
 
 - Background bird detection using Google Cloud Vision Label Detection
-- Individual photo classification and burst-level results: `bird`, `no_bird`, or `pending`
-- Discord notifications for bird-positive bursts, including only photos classified as containing birds
+- Sequential photo classification that stops at the first confirmed bird; burst-level results: `bird`, `no_bird`, or `pending`
+- Discord notifications for bird-positive bursts, including all six photos (Discord-sized copies)
 - No Discord notification for bursts classified as having no birds
 - Bird-containing bursts are retained; fully classified non-bird bursts are eligible for automatic cleanup after 24 hours
 - Monthly Google Vision request budget of **900 images**, tracked in SQLite
@@ -237,3 +237,18 @@ Primary references:
 - CatCam implementation-specific behavior: https://github.com/timXTM/cat-cam
 
 **Note:** Generic references explain underlying concepts, not necessarily CatCam's exact algorithms. For instance, CatCam's monthly 900-call limit is an application-level safety limit, not a Google Cloud quota.
+
+
+## Google Vision optimization: stop after first bird
+
+For each new six-photo burst, CatCam checks photos in chronological order (01.jpg to 06.jpg) using Google Cloud Vision. **As soon as one photo is classified as containing a bird, the remaining photos are not submitted to Vision.** The entire burst is marked `bird` and all six original photos and thumbnails are preserved. A burst is classified `no_bird` only if all six photos are successfully checked with no bird detected; this preserves the conservative automatic deletion rule. Incomplete or errored classifications are never eligible for automatic deletion.
+
+Discord receives **all six photos** for a bird-positive burst, with lightweight JPEG copies to avoid large webhook uploads. The original full-resolution images are unchanged. The message reads `Bird detected in photo X` and includes the bird-related labels available from the Google Vision classifier. Unchecked photos are not represented as individually confirmed bird-positive.
+
+The main gallery and the individual burst page show the first bird-positive photo number and the classifier labels, where available. The individual page distinguishes checked-negative, checked-positive, and not-analyzed photos. Older events keep their existing classifications and may have no recorded first-bird photo or labels.
+
+**Quota exhaustion behavior has not been changed in this update.** The existing 900-request monthly budget and current error/incomplete classification handling remain in place; improving quota exhaustion and backlog management is a separate future task.
+
+### Deploying this change
+
+Update these five files together: `wildlife_camera.py`, `catcam_stats.py`, `catcam_dashboard.html`, `catcam_event.html`, and `README.md`. Back up the SQLite database and current code before restarting. The database migration adds nullable `first_bird_photo` and `bird_labels_json` columns; existing records are not rewritten.

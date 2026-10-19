@@ -69,7 +69,7 @@ def update_event(event_id, **fields):
         "discord_status",
         "deleted",
         "deleted_at",
-        "error"
+        "error", "first_bird_photo", "bird_labels_json"
     }
 
     fields = {k: v for k, v in fields.items() if k in allowed}
@@ -183,6 +183,10 @@ def initialize_step4():
             conn.execute("ALTER TABLE events ADD COLUMN discord_photo_count INTEGER DEFAULT 0")
         if 'discord_status' not in columns:
             conn.execute("ALTER TABLE events ADD COLUMN discord_status TEXT DEFAULT 'pending'")
+        if 'first_bird_photo' not in columns:
+            conn.execute("ALTER TABLE events ADD COLUMN first_bird_photo INTEGER")
+        if 'bird_labels_json' not in columns:
+            conn.execute("ALTER TABLE events ADD COLUMN bird_labels_json TEXT")
 
 
 def save_photo_detections(event_id, results):
@@ -238,6 +242,7 @@ def get_dashboard_data(limit=10):
             SELECT timestamp, folder, trigger_source, classification,
                    COALESCE(photo_count,0) AS photo_count,
                    COALESCE(bird_photo_count,0) AS bird_photo_count,
+                   first_bird_photo, bird_labels_json,
                    COALESCE(discord_status,'unknown') AS discord_status
             FROM events ORDER BY id DESC LIMIT ?
         """, (max(1, min(int(limit), 50)),)).fetchall()
@@ -247,3 +252,43 @@ def get_dashboard_data(limit=10):
     summary['api_requests'] = usage[0] if usage else 0
     summary['api_limit'] = MONTHLY_API_LIMIT
     return {'summary': summary, 'recent': [dict(row) for row in recent_rows]}
+
+
+def get_event_details(folder):
+    """Safe, read-only classification metadata for a burst and its six photos."""
+    import json
+    with connect() as conn:
+        conn.row_factory = sqlite3.Row
+        event = conn.execute("""
+            SELECT id, classification, first_bird_photo, bird_labels_json
+            FROM events WHERE folder=? ORDER BY id DESC LIMIT 1
+        """, (str(folder),)).fetchone()
+        if event is None:
+            return {"classification": "unknown", "first_bird_photo": None,
+                    "bird_labels": [], "photos": {}}
+        rows = conn.execute("""
+            SELECT photo_path, bird_detected, confidence, labels_json
+            FROM photo_detections WHERE event_id=?
+        """, (event['id'],)).fetchall()
+    photo_data = {}
+    for row in rows:
+        photo_data[Path(row['photo_path']).name] = {
+            'checked': True, 'bird_detected': bool(row['bird_detected']),
+            'confidence': row['confidence'],
+            'labels': json.loads(row['labels_json'] or '[]')
+        }
+    first = event['first_bird_photo']
+    labels = json.loads(event['bird_labels_json'] or '[]')
+    # Existing bird events predate the new metadata columns.
+    if first is None:
+        positive = sorted(name for name, result in photo_data.items() if result['bird_detected'])
+        if positive:
+            first = int(Path(positive[0]).stem)
+            if not labels:
+                labels = photo_data[positive[0]]['labels']
+    return {
+        'classification': event['classification'],
+        'first_bird_photo': first,
+        'bird_labels': labels,
+        'photos': photo_data
+    }
