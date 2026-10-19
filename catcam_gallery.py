@@ -5,6 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import catcam_activity
 import catcam_stats
+import catcam_advanced
 
 BASE_DIR = Path('/home/pi/wildlife')
 TZ = ZoneInfo('America/New_York')
@@ -41,6 +42,7 @@ def gallery(mode='all', bird_type='', start='', end='', start_hour='', end_hour=
             for folder, classification, deleted in conn.execute('SELECT folder, classification, deleted FROM events WHERE folder IS NOT NULL'):
                 if folder:
                     details[str(Path(folder))] = (classification, bool(deleted))
+    display_tz = ZoneInfo(catcam_advanced.get('timezone'))
     first_hour = int(start_hour) if start_hour not in ('', None) else None
     last_hour = int(end_hour) if end_hour not in ('', None) else None
     events = []
@@ -48,14 +50,15 @@ def gallery(mode='all', bird_type='', start='', end='', start_hour='', end_hour=
         for date_dir in BASE_DIR.iterdir():
             if not date_dir.is_dir() or not date_dir.name.startswith('20'):
                 continue
-            if start and date_dir.name < start or end and date_dir.name > end:
-                continue
             for burst in date_dir.iterdir():
                 if not burst.is_dir():
                     continue
                 try:
-                    local = datetime.strptime(date_dir.name + '/' + burst.name, '%Y-%m-%d/%H-%M-%S').replace(tzinfo=TZ)
+                    original = datetime.strptime(date_dir.name + '/' + burst.name, '%Y-%m-%d/%H-%M-%S').replace(tzinfo=TZ)
+                    local = original.astimezone(display_tz)
                 except ValueError:
+                    continue
+                if start and local.date().isoformat() < start or end and local.date().isoformat() > end:
                     continue
                 if first_hour is not None:
                     h = local.hour

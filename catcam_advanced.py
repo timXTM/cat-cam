@@ -20,6 +20,9 @@ DEFAULTS = {
     'preview_interval': 0.5,
     'mounting_orientation': 'sideways_ccw',
     'rotation_override': 'auto',
+    'gallery_default': 'bird',
+    'vision_start_photo': 1,
+    'timezone': 'America/New_York',
 }
 LIMITS = {
     'pixel_difference': (1, 255, int),
@@ -31,6 +34,7 @@ LIMITS = {
     'thumbnail_max_size': (160, 1000, int),
     'thumbnail_quality': (40, 95, int),
     'preview_interval': (0.25, 5, float),
+    'vision_start_photo': (1, 6, int),
 }
 MOUNTINGS = {'normal': 0, 'sideways_cw': 270, 'upside_down': 180, 'sideways_ccw': 90}
 OVERRIDES = {'auto', '0', '90', '180', '270'}
@@ -44,7 +48,14 @@ def validate(changes):
         raise ValueError('Settings must be an object')
     validated = {}
     for key, value in changes.items():
-        if key == 'mounting_orientation':
+        if key == 'gallery_default':
+            if value not in ('all', 'bird', 'no_bird'): raise ValueError('Invalid gallery default')
+        elif key == 'timezone':
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+            if not isinstance(value, str) or len(value)>100: raise ValueError('Invalid timezone')
+            try: ZoneInfo(value)
+            except (ZoneInfoNotFoundError, ValueError): raise ValueError('Unknown IANA timezone')
+        elif key == 'mounting_orientation':
             if value not in MOUNTINGS: raise ValueError('Invalid mounting orientation')
         elif key == 'rotation_override':
             if value not in OVERRIDES: raise ValueError('Invalid rotation override')

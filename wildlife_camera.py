@@ -1027,7 +1027,9 @@ def bird_detection_worker():
                 checked = []
                 detected_photo = None
                 classification_error = None
-                for photo in photos:
+                start = catcam_advanced.get('vision_start_photo') - 1
+                ordered_photos = photos[start:] + photos[:start]
+                for photo in ordered_photos:
                     result = bird_detection.detect_burst([photo])
                     catcam_stats.save_photo_detections(event_id, result['results'])
                     checked.extend(result['results'])

@@ -9,6 +9,7 @@ from collections import Counter
 from datetime import datetime, date
 from pathlib import Path
 from zoneinfo import ZoneInfo
+import catcam_advanced
 
 DB_PATH = Path('/home/pi/catcam_data/catcam_stats.db')
 LOCAL_TZ = ZoneInfo('America/New_York')
@@ -169,7 +170,7 @@ def _local_datetime(timestamp):
             # Existing CatCam record_trigger writes UTC; preserve that convention.
             from datetime import timezone
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(LOCAL_TZ)
+        return dt.astimezone(ZoneInfo(catcam_advanced.get('timezone')))
     except (TypeError, ValueError, AttributeError):
         return None
 
@@ -265,7 +266,7 @@ def get_activity(start=None, end=None, start_hour=None, end_hour=None,
     return {
         'metric': 'bird_positive_capture_events',
         'description': 'One event per capture burst with a confirmed bird detection; not individual bird visits.',
-        'timezone': str(LOCAL_TZ),
+        'timezone': catcam_advanced.get('timezone'),
         'filters': {'start': start, 'end': end, 'start_hour': from_hour,
                     'end_hour': to_hour, 'bird_type': bird_type},
         'total_events': len(matches),
