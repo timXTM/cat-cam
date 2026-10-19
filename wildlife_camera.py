@@ -414,7 +414,6 @@ class CatCamHandler(BaseHTTPRequestHandler):
 
         if path == "/api/bird-activity":
             try:
-                from urllib.parse import parse_qs
                 import catcam_activity
 
                 params = parse_qs(parsed.query)
