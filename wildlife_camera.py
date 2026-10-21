@@ -195,6 +195,8 @@ WEB_FRAME_INTERVAL = 0.5  # 2 fps maximum
 
 latest_web_frame = None
 latest_web_frame_lock = threading.Lock()
+# Updated by the capture loop, independently of live-stream viewers.
+last_camera_frame_time = None
 
 active_web_viewers = 0
 active_web_viewers_lock = threading.Lock()
@@ -326,6 +328,17 @@ class CatCamHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
 
+        if path in ("/catcam_header.css", "/catcam_header.js"):
+            filename = path.lstrip("/")
+            try:
+                content = (Path(__file__).resolve().parent / filename).read_text(encoding="utf-8")
+            except OSError:
+                self.send_error(404, "Shared header asset unavailable")
+                return
+            mime = "text/css; charset=utf-8" if filename.endswith(".css") else "text/javascript; charset=utf-8"
+            self.send_body(200, content, mime)
+            return
+
         if path in ("/", "/index.html"):
             # Serve the standalone, lightweight dashboard template.
             # Keeping the HTML separate makes future UI changes safer.
@@ -394,9 +407,14 @@ class CatCamHandler(BaseHTTPRequestHandler):
                 motion = current_motion_percent
             with settings_lock:
                 threshold = MOTION_THRESHOLD
+            # This timestamp is updated after a successful camera capture.
+            # Allow for temporary pauses while recording photo bursts.
+            age = None if last_camera_frame_time is None else time.monotonic() - last_camera_frame_time
+            camera_live = age is not None and age < 90
             self.send_body(
                 200,
-                json.dumps({"current_motion": motion, "motion_threshold": threshold}),
+                json.dumps({"current_motion": motion, "motion_threshold": threshold,
+                            "camera_live": camera_live}),
                 "application/json; charset=utf-8"
             )
             return
@@ -1253,6 +1271,7 @@ try:
         try:
             frame = request.make_array("lores")
             gray = frame[:HEIGHT, :WIDTH].astype(np.int16)
+            last_camera_frame_time = time.monotonic()
 
             with active_web_viewers_lock:
                 viewers = active_web_viewers
@@ -1309,6 +1328,7 @@ try:
             try:
                 frame = request.make_array("lores")
                 gray = frame[:HEIGHT, :WIDTH].astype(np.int16)
+                last_camera_frame_time = time.monotonic()
 
                 with active_web_viewers_lock:
                     viewers = active_web_viewers

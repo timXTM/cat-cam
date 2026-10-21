@@ -55,3 +55,55 @@ Run `python3 -m unittest -v test_catcam_activity.py`, then `sudo systemctl resta
 ## Performance
 
 Stage 1 reads the existing SQLite `events` and `photo_detections` tables; it does not alter or backfill historical rows. It returns matching event metadata for later Gallery filtering. For very large histories, the next iteration should paginate `events` and add database indexes / SQL-level date filtering to reduce Pi Zero CPU and response sizes.
+
+
+---
+
+## Shared Navigation and Camera Health (October 2026)
+
+### Shared navigation
+
+CatCam uses a shared header across Dashboard, Settings, Gallery,
+Bird Activity, photo detail pages, and the legacy Bird Gallery.
+
+The shared header consists of:
+
+- `catcam_header.css`: Common header styling and layout.
+- `catcam_header.js`: Navigation and camera-status behavior.
+
+All pages use consistent header spacing, navigation, and status indicators.
+
+### Camera health monitoring
+
+The shared header displays three camera states:
+
+- **Live:** The camera is actively capturing frames.
+- **Offline:** The camera has stopped producing frames.
+- **Checking:** The initial camera-health request is in progress.
+
+All pages retrieve camera health from the `/api/status` endpoint.
+
+The endpoint includes a `camera_live` boolean indicating whether
+the camera has successfully captured a frame within the last 90 seconds.
+
+Camera-health monitoring uses existing camera activity rather than
+opening additional video streams, minimizing Raspberry Pi CPU usage.
+
+### Troubleshooting
+
+To check camera health from the Raspberry Pi:
+
+    curl -s http://192.168.1.201:8080/api/status
+
+Look for `"camera_live": true` in the response.
+
+The CatCam web server currently binds to its LAN address.
+Requests to `localhost:8080` may therefore fail.
+
+To restart CatCam:
+
+    sudo systemctl restart catcam.service
+
+To inspect its status:
+
+    sudo systemctl status catcam.service --no-pager
