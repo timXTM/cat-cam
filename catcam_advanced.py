@@ -22,6 +22,15 @@ DEFAULTS = {
     'rotation_override': 'auto',
     'gallery_default': 'bird',
     'vision_start_photo': 1,
+    # Local AI is not activated until the Pi 4 service integration is installed.
+    'detection_engine': 'google_vision',
+    'local_ai_host': '192.168.1.75',
+    'local_ai_port': 8765,
+    'local_ai_photo_root': '/mnt/494USB/CatCam Wildlife',
+    'local_ai_confidence': 0.25,
+    'local_ai_species_enabled': True,
+    'local_ai_timeout': 120,
+
     'timezone': 'America/New_York',
 }
 LIMITS = {
@@ -35,10 +44,14 @@ LIMITS = {
     'thumbnail_quality': (40, 95, int),
     'preview_interval': (0.25, 5, float),
     'vision_start_photo': (1, 6, int),
+    'local_ai_port': (1, 65535, int),
+    'local_ai_confidence': (0.05, 0.95, float),
+    'local_ai_timeout': (15, 600, int),
+
 }
 MOUNTINGS = {'normal': 0, 'sideways_cw': 270, 'upside_down': 180, 'sideways_ccw': 90}
 OVERRIDES = {'auto', '0', '90', '180', '270'}
-BOOLEAN_KEYS = {'motion_enabled', 'discord_enabled', 'cleanup_enabled'}
+BOOLEAN_KEYS = {'motion_enabled', 'discord_enabled', 'cleanup_enabled', 'local_ai_species_enabled'}
 _lock = threading.RLock()
 _values = dict(DEFAULTS)
 
@@ -48,7 +61,22 @@ def validate(changes):
         raise ValueError('Settings must be an object')
     validated = {}
     for key, value in changes.items():
-        if key == 'gallery_default':
+        if key == 'detection_engine':
+            if value != 'google_vision':
+                raise ValueError('Local AI mode is not yet installed. Keep Google Vision selected.')
+        elif key == 'local_ai_host':
+            import ipaddress
+            try:
+                ipaddress.ip_address(value)
+            except (ValueError, TypeError):
+                raise ValueError('Local AI host must be an IP address')
+        elif key == 'local_ai_photo_root':
+            from pathlib import PurePosixPath
+            if (not isinstance(value, str) or len(value) > 255 or
+                not value.startswith('/') or '..' in PurePosixPath(value).parts or
+                any(ord(c) < 32 for c in value)):
+                raise ValueError('Photo folder must be an absolute path on the Pi 4')
+        elif key == 'gallery_default':
             if value not in ('all', 'bird', 'no_bird'): raise ValueError('Invalid gallery default')
         elif key == 'timezone':
             from zoneinfo import ZoneInfo, ZoneInfoNotFoundError

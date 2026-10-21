@@ -69,7 +69,12 @@ def update_event(event_id, **fields):
         "discord_status",
         "deleted",
         "deleted_at",
-        "error", "first_bird_photo", "bird_labels_json"
+        "error", "first_bird_photo", "bird_labels_json",
+        "detection_engine",
+        "ai_species",
+        "ai_species_score",
+        "confirmed_species",
+        "species_status"
     }
 
     fields = {k: v for k, v in fields.items() if k in allowed}
@@ -187,6 +192,19 @@ def initialize_step4():
             conn.execute("ALTER TABLE events ADD COLUMN first_bird_photo INTEGER")
         if 'bird_labels_json' not in columns:
             conn.execute("ALTER TABLE events ADD COLUMN bird_labels_json TEXT")
+
+        new_columns = {
+            "detection_engine": "TEXT",
+            "ai_species": "TEXT",
+            "ai_species_score": "REAL",
+            "confirmed_species": "TEXT",
+            "species_status": "TEXT DEFAULT 'unreviewed'",
+        }
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
+        for name, definition in new_columns.items():
+            if name not in columns:
+                conn.execute(f"ALTER TABLE events ADD COLUMN {name} {definition}")
+
 
 
 def save_photo_detections(event_id, results):
