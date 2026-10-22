@@ -810,7 +810,8 @@ def send_discord_notification(
     motion_percent,
     event_timestamp,
     first_bird_photo=None,
-    bird_labels=None
+    bird_labels=None,
+    detection_engine='google_vision'
 ):
     """
     Send ONE Discord webhook message containing all six
@@ -844,12 +845,17 @@ def send_discord_notification(
     )
 
     labels_text = ", ".join(str(label) for label in (bird_labels or [])[:8]) or "No descriptive labels"
+    labels_source = (
+        "AIY species estimate"
+        if detection_engine == "local_ai"
+        else "Google Vision labels"
+    )
     message = (
         f"CatCam bird detected\n"
         f"{timestamp_text}\n"
         f"ROI motion: {motion_percent:.1f}%\n"
         f"Bird detected in photo {first_bird_photo or '?'}\n"
-        f"Google Vision labels: {labels_text}\n"
+        f"{labels_source}: {labels_text}\n"
         f"All {len(photos)} burst photos attached (only checked photos are classified).\n"
         f"Folder: {event_dir}"
     )
@@ -1187,7 +1193,8 @@ def bird_detection_worker():
             success = send_discord_notification(
                 all_photos, event_dir, motion_percent or 0.0, event_timestamp,
                 first_bird_photo=detection['first_bird_photo'],
-                bird_labels=detection['bird_labels']
+                bird_labels=detection['bird_labels'],
+                detection_engine=detection['detection_engine']
             )
             if success:
                 catcam_stats.update_event(
