@@ -4,7 +4,7 @@
 
 CatCam is a self-hosted bird-feeder camera running on a Raspberry Pi Zero W. It watches a configurable region of interest (ROI), captures six high-resolution JPEGs per motion/manual trigger, classifies the burst, and serves a LAN dashboard, galleries, and bird-activity analytics. Optional Discord delivery sends bird-positive bursts. The system can use Google Cloud Vision or an authenticated local detector on a separate Raspberry Pi 4.
 
-> **Scope:** This repository contains the Pi Zero camera application, browser UI, and Pi 4 *client*. The Pi 4 AI server implementation, model weights, and Syncthing deployment are **not** in this repository. The addresses and paths below describe the current installation; they are not universal defaults.
+> **Scope:** This repository contains the Pi Zero camera application, browser UI, and Pi 4 *client*. The Pi 4 AI server source code is included in [`pi-four/`](pi-four/). Large model weights, credentials, and the Syncthing deployment are not included. The addresses and paths below describe the current installation; they are not universal defaults.
 
 ## Features
 
@@ -27,7 +27,7 @@ CatCam is a self-hosted bird-feeder camera running on a Raspberry Pi Zero W. It 
 | Shared/synchronized storage | Makes Pi Zero captures accessible to Pi 4 detector | `/mnt/494USB/CatCam Wildlife` on Pi 4 |
 | LAN or trusted VPN browser | View Dashboard, Gallery, Bird Activity | `http://192.168.1.201:8080/` |
 
-The local-AI client sends a relative burst path, ROI, confidence threshold, and species-identification preference. It does **not** upload six JPEGs in the HTTP request. Photos must already be accessible to the Pi 4 through the configured synchronized storage. The Pi 4 server is a separately managed dependency.
+The local-AI client sends a relative burst path, ROI, confidence threshold, and species-identification preference. It does **not** upload six JPEGs in the HTTP request. Photos must already be accessible to the Pi 4 through the configured synchronized storage. The Pi 4 server is deployed separately; its source code and setup notes are available in [`pi-four/README.md`](pi-four/README.md).
 
 ## 3D-printed enclosure
 
@@ -41,6 +41,7 @@ The case is part of the physical build; its printable design files are not inclu
 
 | File | Purpose |
 | --- | --- |
+| [`pi-four/`](pi-four/) | Raspberry Pi 4 AI detection server, YOLO configuration, utilities, and installation documentation |
 | `wildlife_camera.py` | Camera acquisition, ROI motion, six-photo capture, background workers, web server, Discord |
 | `bird_detection.py` | Google Cloud Vision integration and bird-label detection |
 | `catcam_local_ai.py` | Authenticated Pi 4 detection client; no silent Vision fallback |
@@ -199,6 +200,6 @@ unset TOKEN
 
 - Designed for a **trusted LAN or VPN**, **not public internet exposure**. The web server has no application-level login or authorization for settings, manual trigger, or species-confirmation writes.
 - Do not commit webhook URLs, service-account credentials, tokens, photo archives, or the runtime database.
-- Pi 4 server/model installation and Syncthing setup are external to this repository.
+- Pi 4 server source code and setup notes are included in `pi-four/`; model installation and Syncthing configuration remain external.
 - Changing detection settings does not automatically reprocess historical bursts.
 - Existing unit tests focus on Bird Activity logic; hardware capture, browser UI, Discord, and Pi 4 integration require separate end-to-end testing.

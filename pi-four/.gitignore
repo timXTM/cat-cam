@@ -1,0 +1,33 @@
+# Authentication and credentials
+api_token
+*.key
+*.pem
+.env
+.env.*
+
+# Python environment and cache
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Large model files
+*.weights
+*.tflite
+*.onnx
+*.pb
+
+# Images and generated results
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.csv
+
+# Backups
+*.before-*
+*.bak
+*.backup
+
+# macOS
+.DS_Store
