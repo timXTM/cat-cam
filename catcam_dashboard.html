@@ -58,15 +58,16 @@
     <section class="card activity-side"><div class="card-title"><h2>◷ Recent activity</h2><span id="statsUpdated" class="small">Loading…</span></div><div class="table-wrap"><table class="activity-table"><thead><tr><th>Time</th><th>Trigger</th><th>Result</th><th>Birds</th><th>Discord</th></tr></thead><tbody id="activityRows"><tr><td colspan="5">Loading…</td></tr></tbody></table></div></section>
   </div>
   <section class="card section"><div class="section-top"><h2>▧ Recent captures</h2><button class="secondary" data-tab="gallery">View gallery →</button></div><div id="dashboardEvents" class="events"></div></section>
-  <section class="card section"><div class="section-top"><h2>Statistics & API usage</h2></div><div id="apiUsage" class="usage-summary">Loading…</div><div class="usage-track"><div id="apiUsageFill" class="usage-fill"></div></div><div id="detailStats" class="detail-stats"></div><p class="small">Statistics cover events recorded since database tracking began. Updates every 30 seconds.</p></section>
+
 </div>
 <div data-page="gallery" hidden><div class="page-head"><h1>Capture gallery</h1><p>Browse recent six-photo bursts. Open a burst to see all photographs.</p></div><section class="card section"><div class="section-top"><h2>Recent captures</h2><div class="filters"><button data-filter="all" class="selected">All</button><button data-filter="bird">Bird events</button><button data-filter="no_bird">No bird</button></div></div><div id="events" class="events">Loading…</div><p class="small">Classification filters apply to recent database events; older photos may be unclassified.</p></section></div>
 <div data-page="settings" hidden><div class="page-head"><h1>Settings</h1><p>Configure CatCam by category. Changes are saved on the Pi and persist after restarts.</p></div><div class="settings-grid"><section class="card setting-group" style="grid-column:1/-1"><h2>📷 Camera mounting & image orientation</h2><p>Choose how the camera sensor is physically mounted. CatCam will correct the preview and newly captured photos to appear upright. This does not rotate the camera physically.</p><div class="orientation-settings"><div><label class="setting-input"><span>Physical camera mounting</span><select data-advanced="mounting_orientation" id="mountingOrientation"><option value="normal">Normal — landscape</option><option value="sideways_cw">Sideways, 90° clockwise — portrait</option><option value="sideways_ccw">Sideways, 90° counterclockwise — portrait (current default)</option><option value="upside_down">Upside down — landscape</option></select></label><label class="setting-input"><span>Advanced: override output rotation</span><select data-advanced="rotation_override" id="rotationOverride"><option value="auto">Automatic (based on mounting)</option><option value="0">0° clockwise</option><option value="90">90° clockwise</option><option value="180">180° clockwise</option><option value="270">270° clockwise</option></select></label><p class="small" id="orientationDescription" role="status"></p><p class="small">If the image appears sideways or upside down, try the opposite sideways option or the advanced override. The settings apply to new captures only; existing photos remain unchanged. The motion ROI remains attached to the same physical area of the sensor.</p><button type="button" class="secondary" data-tab="dashboard">Open live camera preview →</button></div><div><div class="orientation-preview"><img id="orientationPreview" alt="Live camera orientation preview" loading="lazy"><span id="orientationPreviewStatus" class="small">Live preview appears when Settings is open.</span></div></div></div><details class="setting-help"><summary>ⓘ About camera mounting and rotation</summary><p>Camera modules have a native sensor orientation. Software rotation corrects the output, but portrait versus landscape framing depends on physically mounting the camera. The motion ROI is stored in native sensor coordinates and transformed to match the live view.</p><a href="https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf" target="_blank" rel="noopener noreferrer">Raspberry Pi Picamera2 manual ↗</a></details></section><section class="card setting-group"><h2>Camera & focus</h2><p>Manual focus, autofocus, motion percentage, and ROI are available in the Dashboard camera controls. Adjust the ROI on the live image.</p><button class="secondary" data-tab="dashboard">Open camera controls →</button></section><section class="card setting-group"><h2>Motion detection</h2><p>Control automatic triggering and sensitivity.</p><label class="toggle-row"><input type="checkbox" data-advanced="motion_enabled"> Enable motion-triggered captures</label><p class="small setting-hint">Manual captures continue to work when disabled.</p><label class="setting-input"><span>Pixel difference threshold</span><input type="number" data-advanced="pixel_difference" min="1" max="255" step="1" required></label><p class="small setting-hint">Higher values ignore small changes between frames.</p><label class="setting-input"><span>Motion sampling interval (seconds)</span><input type="number" data-advanced="sample_interval" min="0.1" max="3" step="0.05" required></label><p class="small setting-hint">Lower intervals use more CPU.</p><label class="setting-input"><span>Minimum seconds between motion bursts</span><input type="number" data-advanced="capture_cooldown" min="0" max="3600" step="0.5" required></label><p class="small setting-hint">Prevents repeated triggers.</p></section><section class="card setting-group"><h2>Capture timing</h2><p>Adjust burst timing without changing the six-photo safety model.</p><label class="setting-input"><span>Pause between burst photos (seconds)</span><input type="number" data-advanced="burst_interval" min="0" max="10" step="0.05" required></label><p class="small setting-hint">Actual capture time is additional.</p></section><section class="card setting-group"><h2>Gallery preferences</h2><p>Default filter for the historical Gallery.</p><label class="setting-input"><span>Default gallery filter</span><select data-advanced="gallery_default"><option value="bird">Birds only</option><option value="all">All bursts</option><option value="no_bird">No birds</option></select></label></section><section class="card setting-group"><h2>Timezone</h2><p>Controls Gallery and Bird Activity reporting times. Existing folder names remain unchanged.</p><label class="setting-input"><span>IANA timezone</span><input type="text" data-advanced="timezone" list="timezoneChoices" placeholder="America/New_York"></label><datalist id="timezoneChoices"><option value="America/New_York"><option value="America/Chicago"><option value="America/Denver"><option value="America/Los_Angeles"><option value="America/Phoenix"><option value="Europe/London"><option value="Europe/Paris"><option value="UTC"></datalist><p class="small">Daylight saving time is automatic. Enter a valid IANA timezone.</p></section><section class="card setting-group"><h2>Bird Detection Engine</h2>
 <p>Choose between Google Cloud Vision and Local AI running on your Raspberry Pi 4.</p>
 <label class="setting-input"><span>Detection engine</span><select data-advanced="detection_engine">
-<option value="google_vision">Google Cloud Vision (active)</option>
+<option value="google_vision">Google Cloud Vision</option>
 <option value="local_ai">Local AI — YOLO + AIY Birds</option>
 </select></label>
+<div id="visionUsageSettings" class="small" hidden aria-live="polite" style="margin:12px 0;padding:12px;border:1px solid var(--border);border-radius:8px">Google Vision requests: loading…</div>
 <h3>Local AI — Raspberry Pi 4</h3>
 <label class="setting-input"><span>Pi 4 IP address</span><input type="text" data-advanced="local_ai_host" placeholder="192.168.1.75"></label>
 <label class="setting-input"><span>Pi 4 service port</span><input type="number" data-advanced="local_ai_port" min="1" max="65535" step="1" required></label>
@@ -279,8 +280,7 @@ const activityRows=document.getElementById("activityRows");
 const statFields=[
   ["total_triggers","Total captures","▣"],
   ["bird_bursts","Bird events","♣"],
-  ["discord_notifications","Discord alerts","♧"],
-  ["api_requests","Vision requests","☁"]
+  ["discord_notifications","Discord alerts","♧"]
 ];
 let recentDbEvents=[];
 function cell(row,value){
@@ -302,9 +302,6 @@ async function loadStatistics(){
       const name=document.createElement("div");name.className="stat-label";name.textContent=label;
       const body=document.createElement("div");body.append(value,name);card.append(glyph,body);statsGrid.appendChild(card);
     }
-    const used=data.summary.api_requests,limit=data.summary.api_limit;
-    document.getElementById("apiUsage").textContent=`${used.toLocaleString()} / ${limit.toLocaleString()} requests (${Math.max(0,limit-used).toLocaleString()} remaining)`;
-    document.getElementById("apiUsageFill").style.width=`${Math.min(100,100*used/Math.max(1,limit))}%`;
     recentDbEvents=data.recent||[];
     activityRows.replaceChildren();
     if(!data.recent.length){
@@ -320,10 +317,6 @@ async function loadStatistics(){
       cell(tr,e.discord_status);
       activityRows.appendChild(tr);
     }
-    document.getElementById("detailStats").textContent=
-      `Motion ${data.summary.motion_triggers||0} · Manual ${data.summary.manual_triggers||0} · `+
-      `No-bird ${data.summary.no_bird_bursts||0} · Pending ${data.summary.pending_bursts||0} · `+
-      `Bird photos ${data.summary.bird_photos||0} · Deleted bursts ${data.summary.deleted_bursts||0}`;
     renderEvents();
     statsUpdated.textContent="Updated "+new Date().toLocaleTimeString();
   }catch(error){statsUpdated.textContent="Could not load statistics";}
@@ -395,6 +388,7 @@ async function loadAdvanced(){
     if(!r.ok)throw new Error(data.message||'Unable to load settings');
     for(const el of advancedInputs){const v=data.settings[el.dataset.advanced];if(el.type==='checkbox')el.checked=!!v;else el.value=v;}
     showOrientation(data.settings);
+    updateVisionUsageVisibility();
     advancedStatus.textContent='';
   }catch(e){advancedStatus.textContent=e.message;}
 }
@@ -414,9 +408,25 @@ async function saveAdvanced(reset=false){
     if(!r.ok)throw new Error(data.message||'Save failed');
     for(const el of advancedInputs){const v=data.settings[el.dataset.advanced];if(el.type==='checkbox')el.checked=!!v;else el.value=v;}
     showOrientation(data.settings);
+    updateVisionUsageVisibility();
     advancedStatus.textContent='Saved — changes are active';
   }catch(e){advancedStatus.textContent=e.message;}
 }
+async function updateVisionUsageVisibility(){
+  const selected=document.querySelector('[data-advanced="detection_engine"]')?.value;
+  const el=document.getElementById('visionUsageSettings');
+  if(!el)return;
+  el.hidden=selected!=='google_vision';
+  if(el.hidden)return;
+  try{
+    const r=await fetch('/api/statistics',{cache:'no-store'});
+    if(!r.ok)throw new Error('Statistics unavailable');
+    const {summary={}}=await r.json();
+    const used=Number(summary.api_requests||0),limit=Number(summary.api_limit||900);
+    el.textContent=`Google Vision requests this month: ${used.toLocaleString()} / ${limit.toLocaleString()} (${Math.max(0,limit-used).toLocaleString()} remaining). Local AI requests do not count toward this limit.`;
+  }catch(e){el.textContent='Google Vision usage unavailable';}
+}
+document.querySelector('[data-advanced="detection_engine"]').addEventListener('change',updateVisionUsageVisibility);
 document.getElementById('advancedSave').addEventListener('click',()=>saveAdvanced());
 document.getElementById('advancedReload').addEventListener('click',loadAdvanced);
 document.getElementById('advancedDefaults').addEventListener('click',()=>saveAdvanced(true));
@@ -427,6 +437,14 @@ loadAdvanced();
 // No remote scripts, libraries, or network requests are required to display this help.
 (() => {
   const references = {
+
+    detection_engine: ["Selects which service classifies each new six-photo burst. Google Cloud Vision uses cloud label detection and consumes your 900-request monthly CatCam budget. Local AI sends burst references to YOLO on your Pi 4, with optional AIY species identification. Existing events retain their original engine. If Local AI fails, CatCam marks the event as an error rather than silently calling Google Vision.", "CatCam project and detector configuration", "https://github.com/timXTM/cat-cam"],
+    local_ai_host: ["The LAN IP address of the Raspberry Pi 4 running the authenticated Local AI detection service. The Pi Zero must be able to reach this address.", "Raspberry Pi networking", "https://www.raspberrypi.com/documentation/computers/remote-access.html"],
+    local_ai_port: ["TCP port on which the Pi 4 Local AI service listens (currently 8765). Changing this requires matching the server configuration.", "CatCam project", "https://github.com/timXTM/cat-cam"],
+    local_ai_photo_root: ["Absolute path on the Pi 4 to the Syncthing-mirrored wildlife photos. The Pi 4 combines this with the date and burst folder to find the six photos.", "Syncthing documentation", "https://docs.syncthing.net/"],
+    local_ai_confidence: ["Minimum YOLO confidence for a bird detection (0 to 1). Lower thresholds catch more possible birds but can increase false positives; higher thresholds may miss distant or partially hidden birds.", "YOLO project", "https://github.com/AlexeyAB/darknet"],
+    local_ai_species_enabled: ["When enabled, AIY Birds attempts to identify the species after YOLO detects a bird. This is an estimate, not a confirmed identification, and does not change whether the burst counts as bird-positive.", "AIY Birds model", "https://www.tensorflow.org/lite/examples"],
+    local_ai_timeout: ["Maximum time allowed for Pi 4 processing before CatCam reports an error. Longer timeouts help when the Pi 4 is busy; errors never count as confirmed no-bird bursts.", "CatCam project", "https://github.com/timXTM/cat-cam"],
     motion_enabled: ["When enabled, CatCam watches the selected ROI for changes and starts a six-photo burst when its motion rules are met. Disabling this does not disable manual capture.", "CatCam implementation", "https://github.com/timXTM/cat-cam"],
     pixel_difference: ["A pixel must change by at least this much (on a 0–255 intensity scale) to count toward motion. Raising it filters subtle changes, but can miss small or low-contrast birds. This is distinct from the percentage-of-ROI motion threshold on the Dashboard.", "Image thresholding concepts (OpenCV)", "https://docs.opencv.org/4.x/db/d8e/tutorial_threshold.html"],
     sample_interval: ["Seconds between motion-analysis samples. Shorter intervals check for movement more often, but increase processing work. This does not control photo-burst spacing.", "Python timing reference", "https://docs.python.org/3/library/time.html"],

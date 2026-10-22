@@ -81,6 +81,12 @@ def gallery(mode='all', bird_type='', start='', end='', start_hour='', end_hour=
                 events.append({'date': date_dir.name, 'event': burst.name,
                     'timestamp': local.isoformat(), 'classification': 'bird' if bird else classification,
                     'bird_type': bird['bird_type'] if bird else None,
+                    'species_confidence': bird.get('species_confidence') if bird else None,
+                    'detection_engine': bird.get('detection_engine') if bird else None,
+                    'ai_species': bird.get('ai_species') if bird else None,
+                    'ai_species_score': bird.get('ai_species_score') if bird else None,
+                    'confirmed_species': bird.get('confirmed_species') if bird else None,
+                    'species_status': bird.get('species_status') if bird else None,
                     'photos': photos})
     events.sort(key=lambda e: (e['date'], e['event']), reverse=order == 'newest')
     total = len(events)

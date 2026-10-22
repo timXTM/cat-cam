@@ -222,6 +222,8 @@ def get_activity(start=None, end=None, start_hour=None, end_hour=None,
         rows = conn.execute('''
             SELECT e.id, e.timestamp, e.folder, e.trigger_source,
                    e.first_bird_photo, e.bird_labels_json,
+                    e.detection_engine, e.ai_species, e.ai_species_score,
+                    e.confirmed_species, e.species_status,
                    (SELECT p.labels_json FROM photo_detections p
                     WHERE p.event_id=e.id AND p.bird_detected=1
                     ORDER BY p.photo_path LIMIT 1) AS photo_labels
@@ -237,6 +239,14 @@ def get_activity(start=None, end=None, start_hour=None, end_hour=None,
         labels = _labels(row['photo_labels'])
         # Legacy event-level names lack confidence; use scored photo labels when available.
         species, confidence = identify_bird_type(labels)
+        engine = row['detection_engine'] or 'google_vision'
+        ai_species = row['ai_species'] if engine == 'local_ai' else None
+        ai_score = row['ai_species_score'] if engine == 'local_ai' else None
+        confirmed = row['confirmed_species']
+        if confirmed:
+            species, confidence = confirmed, None
+        elif ai_species:
+            species, confidence = ai_species, ai_score
         all_types.add(species)
         dt = _local_datetime(row['timestamp'])
         if dt is None:
@@ -259,7 +269,10 @@ def get_activity(start=None, end=None, start_hour=None, end_hour=None,
             'id': row['id'], 'timestamp_local': dt.isoformat(),
             'folder': row['folder'], 'trigger_source': row['trigger_source'],
             'bird_type': species, 'species_confidence': confidence,
-            'first_bird_photo': row['first_bird_photo'],
+             'detection_engine': engine, 'ai_species': ai_species,
+             'ai_species_score': ai_score, 'confirmed_species': confirmed,
+             'species_status': row['species_status'] or 'unreviewed',
+             'first_bird_photo': row['first_bird_photo'],
             'labels': labels,
         })
 

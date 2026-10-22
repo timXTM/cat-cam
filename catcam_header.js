@@ -8,7 +8,7 @@
   const onActivity=path==='/bird-activity';
   const onGallery=path==='/gallery'||path==='/bird-gallery'||path==='/event';
   const darkId=onHome||path==='/event'?'darkToggle':'dark';
-  const brand=document.createElement('a');brand.className='catcam-brand';brand.href='/';
+  const brand=document.createElement('a');brand.className='catcam-brand';brand.href='/?tab=dashboard';
   brand.innerHTML='<span class="catcam-brand-mark">🐦</span><span class="catcam-brand-name">CatCam</span><span class="catcam-brand-caption">Wildlife Camera</span>';
   const status=document.createElement('div');status.className='catcam-status';
   const camera=document.createElement('span');camera.id='cameraState';camera.textContent='● Checking…';
