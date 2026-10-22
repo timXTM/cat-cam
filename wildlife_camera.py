@@ -10,6 +10,7 @@ import socket
 import threading
 import catcam_stats
 import bird_detection
+import catcam_local_ai
 import catcam_cleanup
 import catcam_thumbnails
 import catcam_advanced
@@ -1016,7 +1017,8 @@ def bird_detection_worker():
         try:
             with catcam_stats.connect() as conn:
                 row = conn.execute("""
-                    SELECT id, folder, photo_count, motion_percent, classification
+                    SELECT id, folder, photo_count, motion_percent, classification,
+                           COALESCE(detection_engine, 'google_vision')
                     FROM events
                     WHERE (classification='pending' AND photo_count > 0)
                        OR (classification='bird' AND discord_status='pending')
@@ -1026,7 +1028,7 @@ def bird_detection_worker():
                 time.sleep(5)
                 continue
 
-            event_id, folder, expected_count, motion_percent, classification = row
+            event_id, folder, expected_count, motion_percent, classification, engine = row
             event_dir = Path(folder)
 
             if classification == 'pending':
@@ -1039,55 +1041,86 @@ def bird_detection_worker():
                     continue
                 catcam_stats.update_event(event_id, classification='processing')
                 print(f'Analyzing event {event_id}: {event_dir}', flush=True)
-                # Classify photos in order, stopping immediately after the first bird.
-                # Reuse the existing single-image Google Vision logic via detect_burst([photo]).
-                # The original classifier handles API reservation and its own bird threshold.
-                checked = []
-                detected_photo = None
-                classification_error = None
-                start = catcam_advanced.get('vision_start_photo') - 1
-                ordered_photos = photos[start:] + photos[:start]
-                for photo in ordered_photos:
-                    result = bird_detection.detect_burst([photo])
-                    catcam_stats.save_photo_detections(event_id, result['results'])
-                    checked.extend(result['results'])
-                    if not result['complete']:
-                        classification_error = '; '.join(str(e.get('error', 'Vision error'))
-                                                          for e in result.get('errors', [])) or 'Incomplete classification'
-                        break
-                    if result['classification'] == 'bird':
-                        detected_photo = photo
-                        break
-                if classification_error:
+                if engine == 'local_ai':
+                    try:
+                        # Use the same adjustable ROI as motion detection.
+                        with settings_lock:
+                            detection_roi = (ROI_X1, ROI_Y1, ROI_X2, ROI_Y2)
+                        result = catcam_local_ai.detect(
+                            event_dir, catcam_advanced.get(), detection_roi)
+                        outcome = result['classification']
+                        photo_name = result.get('photo')
+                        first_bird_photo = int(Path(photo_name).stem) if photo_name else None
+                        species = result.get('species') if outcome == 'bird' else None
+                        species_score = result.get('species_score') if outcome == 'bird' else None
+                        if species_score is not None:
+                            species_score = float(species_score)
+                        catcam_stats.update_event(
+                            event_id, classification=outcome,
+                            bird_photo_count=1 if outcome == 'bird' else 0,
+                            first_bird_photo=first_bird_photo,
+                            bird_labels_json=json.dumps([species] if species else []),
+                            ai_species=species, ai_species_score=species_score,
+                            species_status='unreviewed', error=None)
+                        print(f'Event {event_id}: Local AI {outcome} ({result.get("photos_checked")} photos)', flush=True)
+                    except Exception as exc:
+                        catcam_stats.update_event(event_id, classification='error', error=str(exc))
+                        print(f'Event {event_id}: Local AI error: {exc}', flush=True)
+                        continue
+                elif engine == 'google_vision':
+                    # Classify photos in order, stopping immediately after the first bird.
+                    # Reuse the existing single-image Google Vision logic via detect_burst([photo]).
+                    # The original classifier handles API reservation and its own bird threshold.
+                    checked = []
+                    detected_photo = None
+                    classification_error = None
+                    start = catcam_advanced.get('vision_start_photo') - 1
+                    ordered_photos = photos[start:] + photos[:start]
+                    for photo in ordered_photos:
+                        result = bird_detection.detect_burst([photo])
+                        catcam_stats.save_photo_detections(event_id, result['results'])
+                        checked.extend(result['results'])
+                        if not result['complete']:
+                            classification_error = '; '.join(str(e.get('error', 'Vision error'))
+                                                              for e in result.get('errors', [])) or 'Incomplete classification'
+                            break
+                        if result['classification'] == 'bird':
+                            detected_photo = photo
+                            break
+                    if classification_error:
+                        catcam_stats.update_event(
+                            event_id, classification='error',
+                            bird_photo_count=sum(bool(r['bird_detected']) for r in checked),
+                            error=classification_error
+                        )
+                        print(f'Event {event_id}: classification incomplete: {classification_error}', flush=True)
+                        continue
+                    first_bird_photo = int(detected_photo.stem) if detected_photo else None
+                    bird_result = next((r for r in checked if detected_photo and
+                                        Path(r['photo']) == detected_photo), None)
+                    labels = (bird_result.get('labels') or bird_result.get('bird_labels') or []) if bird_result else []
+                    # Google Vision labels may be strings or dictionaries depending on classifier.
+                    label_names = []
+                    for label in labels:
+                        if isinstance(label, dict):
+                            label_names.append(str(label.get('description') or label.get('name') or ''))
+                        elif isinstance(label, (list, tuple)):
+                            label_names.append(str(label[0]) if label else '')
+                        else:
+                            label_names.append(str(label))
+                    label_names = [s for s in label_names if s][:12]
+                    outcome = 'bird' if detected_photo else 'no_bird'
                     catcam_stats.update_event(
-                        event_id, classification='error',
-                        bird_photo_count=sum(bool(r['bird_detected']) for r in checked),
-                        error=classification_error
+                        event_id, classification=outcome,
+                        bird_photo_count=1 if detected_photo else 0,
+                        first_bird_photo=first_bird_photo,
+                        bird_labels_json=json.dumps(label_names), error=None
                     )
-                    print(f'Event {event_id}: classification incomplete: {classification_error}', flush=True)
+                    print(f"Event {event_id}: {outcome} ({len(checked)}/{len(photos)} Vision calls)", flush=True)
+
+                else:
+                    catcam_stats.update_event(event_id, classification='error', error='Unknown detection engine')
                     continue
-                first_bird_photo = int(detected_photo.stem) if detected_photo else None
-                bird_result = next((r for r in checked if detected_photo and
-                                    Path(r['photo']) == detected_photo), None)
-                labels = (bird_result.get('labels') or bird_result.get('bird_labels') or []) if bird_result else []
-                # Google Vision labels may be strings or dictionaries depending on classifier.
-                label_names = []
-                for label in labels:
-                    if isinstance(label, dict):
-                        label_names.append(str(label.get('description') or label.get('name') or ''))
-                    elif isinstance(label, (list, tuple)):
-                        label_names.append(str(label[0]) if label else '')
-                    else:
-                        label_names.append(str(label))
-                label_names = [s for s in label_names if s][:12]
-                outcome = 'bird' if detected_photo else 'no_bird'
-                catcam_stats.update_event(
-                    event_id, classification=outcome,
-                    bird_photo_count=1 if detected_photo else 0,
-                    first_bird_photo=first_bird_photo,
-                    bird_labels_json=json.dumps(label_names), error=None
-                )
-                print(f"Event {event_id}: {outcome} ({len(checked)}/{len(photos)} Vision calls)", flush=True)
                 if outcome == 'no_bird':
                     catcam_stats.update_event(event_id, discord_status='not_needed')
                     print(f'Event {event_id}: Discord skipped (no birds)', flush=True)
@@ -1188,6 +1221,9 @@ def run_capture_event(changed_percent, trigger_source):
             changed_percent,
             event_dir
         )
+
+        # Pin the chosen engine to this event, even if settings change later.
+        catcam_stats.update_event(event_id, detection_engine=catcam_advanced.get('detection_engine'))
 
         print(f"{trigger_source.upper()} TRIGGER: {changed_percent:.2f}% ROI motion",flush=True)
         print(f"Event folder: {event_dir}",flush=True)

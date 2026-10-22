@@ -278,7 +278,9 @@ def get_event_details(folder):
     with connect() as conn:
         conn.row_factory = sqlite3.Row
         event = conn.execute("""
-            SELECT id, classification, first_bird_photo, bird_labels_json
+            SELECT id, classification, first_bird_photo, bird_labels_json,
+                   detection_engine, ai_species, ai_species_score,
+                   confirmed_species, species_status
             FROM events WHERE folder=? ORDER BY id DESC LIMIT 1
         """, (str(folder),)).fetchone()
         if event is None:
@@ -323,6 +325,11 @@ def get_event_details(folder):
         result['labels'] = normalize_labels(result['labels'])
     return {
         'classification': event['classification'],
+        'detection_engine': event['detection_engine'] or 'google_vision',
+        'ai_species': event['ai_species'],
+        'ai_species_score': event['ai_species_score'],
+        'confirmed_species': event['confirmed_species'],
+        'species_status': event['species_status'],
         'first_bird_photo': first,
         'bird_labels': normalize_labels(labels),
         'photos': photo_data

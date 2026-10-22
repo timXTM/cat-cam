@@ -46,7 +46,7 @@ LIMITS = {
     'vision_start_photo': (1, 6, int),
     'local_ai_port': (1, 65535, int),
     'local_ai_confidence': (0.05, 0.95, float),
-    'local_ai_timeout': (15, 600, int),
+    'local_ai_timeout': (15, 300, int),
 
 }
 MOUNTINGS = {'normal': 0, 'sideways_cw': 270, 'upside_down': 180, 'sideways_ccw': 90}
@@ -62,8 +62,8 @@ def validate(changes):
     validated = {}
     for key, value in changes.items():
         if key == 'detection_engine':
-            if value != 'google_vision':
-                raise ValueError('Local AI mode is not yet installed. Keep Google Vision selected.')
+            if value not in ('google_vision', 'local_ai'):
+                raise ValueError('Unknown detection engine')
         elif key == 'local_ai_host':
             import ipaddress
             try:
