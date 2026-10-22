@@ -1,109 +1,204 @@
-# CatCam — Bird Activity Stage 1
+# CatCam — Raspberry Pi Wildlife Camera
 
-## Metric
+**Documentation updated:** October 21, 2026 · **Code reviewed:** `timXTM/cat-cam`, commit `c549e5a`.
 
-**Bird-positive capture events** = number of capture bursts whose event classification is `bird`. Each burst is counted **once**, regardless of how many photographs show a bird or how many Google Vision labels are returned. Repeated motion triggers may create multiple events; the metric is not a count of individual birds or distinct bird visits.
+CatCam is a self-hosted bird-feeder camera running on a Raspberry Pi Zero W. It watches a configurable region of interest (ROI), captures six high-resolution JPEGs per motion/manual trigger, classifies the burst, and serves a LAN dashboard, galleries, and bird-activity analytics. Optional Discord delivery sends bird-positive bursts. The system can use Google Cloud Vision or an authenticated local detector on a separate Raspberry Pi 4.
 
-## Install
+> **Scope:** This repository contains the Pi Zero camera application, browser UI, and Pi 4 *client*. The Pi 4 AI server implementation, model weights, and Syncthing deployment are **not** in this repository. The addresses and paths below describe the current installation; they are not universal defaults.
 
-1. Copy `catcam_activity.py` to `/home/pi/catcam/catcam_activity.py` (new file).
-2. Replace `wildlife_camera.py` with the supplied `wildlife_camera_activity.py`, renamed to `wildlife_camera.py`.
-3. Optionally copy `test_catcam_activity.py` for offline testing.
-4. Commit/push in GitHub Desktop; pull on Pi.
-5. Run `python3 -m py_compile catcam_activity.py wildlife_camera.py` and `python3 -m unittest -v test_catcam_activity.py`.
-6. Restart CatCam only after checking for local changes and a successful compilation.
+## Features
 
-## Read-only API
+- Live MJPEG preview, camera-health status, manual trigger, motion ROI and threshold, focus/autofocus, and mounting orientation/rotation.
+- Six full-resolution photographs per burst, background thumbnail cache, date/time-organized archive.
+- Two detection engines: Google Vision label detection and Pi 4 local AI (YOLOv4-tiny bird detection with optional AIY Birds species estimation on the external server).
+- Bird-positive bursts retained; optional Discord delivery of all six images. Conservatively delete fully classified non-bird bursts after the configured retention (default: 24 hours).
+- Dashboard and Settings; paginated Gallery with classification/species/date/hour/sort filters; Bird Activity charts; burst detail pages.
+- Gallery thumbnail clicks open the burst with that specific photograph enlarged; the viewer has labels, previous/next controls, and an **Open original** link. Thumbnail cards remain aligned when labels differ in length.
+- Human species confirmation per bird-positive burst. Confirmations are separate from, and take precedence over, AIY/Google Vision estimates; they can be edited or cleared.
+- Shared navigation/header and consistent camera-health indicators across pages; light/dark theme.
+- SQLite event, photo detection, Google Vision usage, and confirmed-species records.
 
-`GET /api/bird-activity`
+## Hardware and topology
 
-Optional filters:
+| Component | Role | Current example |
+| --- | --- | --- |
+| Pi Zero W + Raspberry Pi camera | Capture, motion detection, HTTP UI, event database | `192.168.1.201:8080` |
+| Pi 4 | External authenticated local AI server | `192.168.1.75:8765` |
+| Shared/synchronized storage | Makes Pi Zero captures accessible to Pi 4 detector | `/mnt/494USB/CatCam Wildlife` on Pi 4 |
+| LAN or trusted VPN browser | View Dashboard, Gallery, Bird Activity | `http://192.168.1.201:8080/` |
 
-- `start=YYYY-MM-DD` — local start date, inclusive
-- `end=YYYY-MM-DD` — local end date, inclusive
-- `start_hour=0..23` and `end_hour=0..23` — local hours, inclusive; overnight ranges supported
-- `bird_type=Northern%20cardinal` — a single normalized bird type; `Unknown bird type` is valid
+The local-AI client sends a relative burst path, ROI, confidence threshold, and species-identification preference. It does **not** upload six JPEGs in the HTTP request. Photos must already be accessible to the Pi 4 through the configured synchronized storage. The Pi 4 server is a separately managed dependency.
 
-All date/time calculations use `America/New_York` (local DST handled automatically). The output includes `total_events`, `by_hour` (24 entries including zero hours), `by_day`, `by_bird_type`, `available_bird_types`, and `events` (matching event IDs and folders for Stage 3 Gallery integration).
+## 3D-printed enclosure
 
-Sample test:
+The CatCam build uses a **3D-printed case from Thingiverse**: [Thingiverse design #4375297](https://www.thingiverse.com/thing:4375297).
+
+The case is part of the physical build; its printable design files are not included in this software repository. Consult the Thingiverse listing for the original files, designer credit, printing guidance, and license. Check camera module fit, ribbon-cable clearance, and mounting orientation before assembly. The CatCam Settings page supports camera mounting orientation and image rotation adjustments.
+
+*The Thingiverse listing was not accessible for verification during this README update, so exact print specifications and designer attribution are not asserted here.*
+
+## Repository layout
+
+| File | Purpose |
+| --- | --- |
+| `wildlife_camera.py` | Camera acquisition, ROI motion, six-photo capture, background workers, web server, Discord |
+| `bird_detection.py` | Google Cloud Vision integration and bird-label detection |
+| `catcam_local_ai.py` | Authenticated Pi 4 detection client; no silent Vision fallback |
+| `catcam_advanced.py` | Validation and persistence of advanced settings |
+| `catcam_stats.py` | SQLite schema, events, photo detections, Vision usage, species confirmation |
+| `catcam_activity.py` | Event-based bird analytics, inferred types, hierarchical filters |
+| `catcam_gallery.py` | Gallery discovery, filters, pagination |
+| `catcam_cleanup.py` | Safe non-bird burst and thumbnail cleanup |
+| `catcam_thumbnails.py` | Background thumbnail generation/cache |
+| `catcam_dashboard.html` | Dashboard and Settings interface |
+| `catcam_gallery.html` | Capture Gallery |
+| `catcam_event.html` | Burst details, enlarged-photo viewer, species-confirmation form |
+| `catcam_bird_activity.html` | Bird Activity charts and event listing |
+| `catcam_bird_gallery.html` | Legacy bird gallery template (current `/bird-gallery` route uses main Gallery) |
+| `catcam_header.css`, `catcam_header.js` | Shared navigation and camera-health header |
+| `catcam.service` | Example systemd unit |
+| `update.sh` | Guarded Git update, restart, and rollback helper |
+| `requirements.txt` | Python dependency notes |
+| `test_catcam_activity.py` | Unit tests for analytics and classification heuristics |
+| `install_catcam_bird_activity.py`, `install_catcam_bird_type_gallery.py` | Older installation/migration helpers, not the standard update path |
+
+## Installation and operation on the Pi Zero
+
+This repository does not provide a complete fresh-install script. Configure Raspberry Pi OS, the camera, network, credentials, and systemd separately. Install Picamera2 through Raspberry Pi OS packages rather than treating it as an ordinary pip-only dependency:
 
 ```bash
-curl -s 'http://localhost:8080/api/bird-activity' | python3 -m json.tool | head -70
-curl -s 'http://localhost:8080/api/bird-activity?start=2026-10-18&end=2026-10-19&start_hour=15&end_hour=19' | python3 -m json.tool | head -70
+sudo apt update
+sudo apt install python3-picamera2 python3-numpy python3-requests python3-pil
 ```
 
-## Hierarchical bird-type identification (revised)
+The current systemd service runs as user `pi`, with working directory `/home/pi`, command `/usr/bin/python3 /home/pi/catcam/wildlife_camera.py`, and environment file `/etc/catcam.env`. Protect that file and keep all credentials out of Git.
 
-The basic metric remains **one bird-positive capture event**, never one bird or one photo. The analytics read the Google Vision labels saved in `photo_detections` for the first bird-positive photo; no API requests or database changes are needed.
+For an existing deployment, commit/push changes from the development machine, then:
 
-- CatCam prefers a specific recognized species (e.g. `Northern cardinal`) if confidence is at least **65%** and it leads another species candidate by at least **10 percentage points**.
-- If no specific species meets that standard, a recognized broader bird label (e.g. `Cardinal`, `Finch`, `Sparrow`, `Woodpecker`) at **65%** or higher is retained instead of incorrectly labeling the event Unknown.
-- If two close species candidates belong to the same broader type (e.g. Downy and Hairy woodpecker), CatCam can select that common broader type.
-- `Bird` alone becomes `Unknown bird type`. These are heuristics, not definitive biological identification.
-- **Hierarchical filters:** `bird_type=Cardinal` includes events assigned `Cardinal` **or** `Northern cardinal`; `bird_type=Northern%20cardinal` includes only Northern cardinal. Likewise `Finch` includes House finch and American goldfinch, and so forth. `by_bird_type` still counts each event **only once** under its assigned (most specific reliable) type.
-- `available_bird_types` includes assigned types plus their filterable parent categories. Parent groups are practical bird-type labels and are not a claim of exact taxonomic classification.
+```bash
+cd /home/pi/catcam
+git status --short
+git pull --ff-only
+python3 -m py_compile wildlife_camera.py catcam_stats.py catcam_activity.py
+sudo systemctl restart catcam.service
+sudo systemctl status catcam.service --no-pager
+sudo journalctl -u catcam.service -n 100 --no-pager
+```
 
-The known-species and broader-label vocabularies are maintained explicitly in `catcam_activity.py` (`SPECIES_ALIASES`, `BROAD_ALIASES`, and `TYPE_PARENTS`). New bird types can be added as they appear in actual data. The classifier never invents a species label that Google Vision did not support.
+Alternatively, `./update.sh` fetches `origin/main`, rejects a dirty working tree, fast-forwards, compiles the main Python file, restarts, and attempts a rollback on failure. Read it before use: its rollback uses `git reset --hard` after first checking for local modifications.
 
-### Updating an existing Stage 1 installation
+## Storage and configuration
 
-Replace **only** `catcam_activity.py` with the revised version. Optionally replace `test_catcam_activity.py` and update this documentation. The existing Stage 1 `wildlife_camera.py` API integration **does not change**. This avoids replacing camera, Discord, or Gallery code unnecessarily.
+| Path on Pi Zero | Content |
+| --- | --- |
+| `/home/pi/wildlife/YYYY-MM-DD/HH-MM-SS/01.jpg` … `06.jpg` | Original burst images |
+| `/home/pi/catcam_data/catcam_stats.db` | SQLite event/label/usage/confirmation history |
+| `/home/pi/catcam_data/thumbnails/` | Thumbnail cache |
+| `/home/pi/catcam_settings.json` | Basic ROI, threshold, and focus settings |
+| `/home/pi/catcam_advanced_settings.json` | Advanced persistent settings |
+| `/home/pi/.catcam-discord` | File-presence toggle for Discord sending |
+| `/home/pi/catcam_local_ai_token` | Secret token for Pi 4 API |
+| `/home/pi/.config/catcam/vision-credentials.json` | Google Vision credentials, if used |
+| `/etc/catcam.env` | Service environment, including `DISCORD_WEBHOOK_URL` |
 
-Run `python3 -m unittest -v test_catcam_activity.py`, then `sudo systemctl restart catcam.service` after the new file has been pulled onto the Pi. No migration or new Vision requests are needed.
+Advanced settings cover motion enablement, pixel difference, sampling/cooldown/burst intervals, Discord/cleanup switches, retention and cleanup cadence, thumbnail/preview parameters, mounting orientation and rotation, default gallery filter, Google Vision starting photo, detection engine, Pi 4 host/port/photo root/confidence/species toggle/timeout, and IANA timezone. Defaults and validation are defined in `catcam_advanced.py`.
 
-## Performance
+**Back up the SQLite database and settings files separately.** Git does not version or roll back runtime data.
 
-Stage 1 reads the existing SQLite `events` and `photo_detections` tables; it does not alter or backfill historical rows. It returns matching event metadata for later Gallery filtering. For very large histories, the next iteration should paginate `events` and add database indexes / SQL-level date filtering to reduce Pi Zero CPU and response sizes.
+## Capture and classification pipeline
 
+1. The camera samples frames and checks motion within the configured ROI; a manual trigger is also supported.
+2. A trigger records an event and captures six high-resolution images.
+3. The detection worker uses the engine recorded for the event:
+   - **Google Vision:** starts with the configured image number, wraps around the burst, and stops on the first bird-positive label result. Successful photo-level results are recorded. The hard-coded budget is **900 requests per calendar month** (`MONTHLY_API_LIMIT` in `catcam_stats.py`).
+   - **Local AI:** calls the authenticated Pi 4 endpoint with the synchronized burst path and ROI. A bird result may include the detected photo, AIY species estimate, and confidence. Errors are **not** silently retried through Google Vision.
+4. Bird-positive bursts are preserved and optionally sent to Discord as all six originals. Non-bird bursts do not generate Discord bird notifications.
+5. A cleanup worker periodically deletes eligible fully classified non-bird bursts after the retention interval (default 24 hours; default check interval 15 minutes).
 
----
+Incomplete or failed classification must not be treated as `no_bird`. Cleanup requires a `no_bird` event, six expected photos, six recorded negative photo detections, and strict path/content validation. To preview candidates without deleting anything:
 
-## Shared Navigation and Camera Health (October 2026)
+```bash
+cd /home/pi/catcam
+python3 catcam_cleanup.py --dry-run
+```
 
-### Shared navigation
+The Discord file toggle is enabled with `touch /home/pi/.catcam-discord` and disabled with `rm -f /home/pi/.catcam-discord`; the advanced Discord setting and configured webhook must also permit delivery.
 
-CatCam uses a shared header across Dashboard, Settings, Gallery,
-Bird Activity, photo detail pages, and the legacy Bird Gallery.
+## Species identification and manual confirmation
 
-The shared header consists of:
+- Google Vision labels are mapped to species/broader bird types using heuristics in `catcam_activity.py`. Specific labels require at least **65%** confidence and a **10-percentage-point** lead over a competing species; otherwise a confident broader type may be used. A generic `Bird` label is `Unknown bird type`.
+- Local AI can save `ai_species` and `ai_species_score`; these are model estimates, not human verification.
+- In a bird-positive burst's detail page, enter a species name in the confirmation form and save it. Confirmations are **per burst**, not per photo. You can edit or clear the confirmation.
+- `confirmed_species` and `species_status` are stored separately from AIY output. Gallery and Bird Activity prioritize a confirmed species; clearing it restores the unreviewed state and retains model estimates.
+- Saving a confirmation does not rerun detection, change images, or consume Google Vision requests.
 
-- `catcam_header.css`: Common header styling and layout.
-- `catcam_header.js`: Navigation and camera-status behavior.
+## Web interface and API
 
-All pages use consistent header spacing, navigation, and status indicators.
+| Route | Function |
+| --- | --- |
+| `/`, `/?tab=dashboard` | Dashboard, camera preview, controls |
+| `/?tab=settings` | Settings, detection engine, conditional Vision usage |
+| `/gallery` | Paginated historical Gallery |
+| `/event?date=YYYY-MM-DD&event=HH-MM-SS` | Burst detail and enlarged-photo viewer |
+| `/bird-activity` | Bird Activity charts |
+| `GET /api/status` | Camera health; `camera_live` true when a frame was captured within 90 seconds |
+| `GET /api/statistics` | Event and API usage statistics |
+| `GET /api/gallery` | Gallery events, pagination, filters |
+| `GET /api/bird-activity` | Event-based bird analytics |
+| `GET /api/advanced-settings` | Read advanced settings |
+| `POST /api/advanced-settings` | Update advanced settings |
+| `POST /settings` | Save basic camera settings |
+| `POST /trigger` | Manual capture request |
+| `POST /api/species-confirmation` | Set or clear species for a bird-positive burst |
+| `/stream.mjpg` | Live MJPEG |
+| `/photo/...`, `/thumb/...` | Full JPEG and cached thumbnail |
 
-### Camera health monitoring
+Gallery query parameters: `mode=all|bird|no_bird`, `bird_type`, `start`, `end`, `start_hour`, `end_hour`, `order=newest|oldest`, `page`. Default page size is 20.
 
-The shared header displays three camera states:
+Bird Activity query parameters: `start`, `end` (`YYYY-MM-DD`), optional `start_hour`, `end_hour` (0–23, including overnight ranges), and `bird_type`. The response includes `total_events`, `by_hour`, `by_day`, `by_bird_type`, `available_bird_types`, and matching events. Broader filters such as `Cardinal` may include more specific types such as `Northern cardinal`.
 
-- **Live:** The camera is actively capturing frames.
-- **Offline:** The camera has stopped producing frames.
-- **Checking:** The initial camera-health request is in progress.
+**Metric definition:** A bird-positive capture event counts **one burst**, not six photos, not the number of bird labels, and not necessarily one unique bird visit. Repeated triggers can create multiple events.
 
-All pages retrieve camera health from the `/api/status` endpoint.
+Species confirmation request body:
 
-The endpoint includes a `camera_live` boolean indicating whether
-the camera has successfully captured a frame within the last 90 seconds.
+```json
+{"date":"2026-10-21","event":"18-59-45","species":"Northern Cardinal"}
+```
 
-Camera-health monitoring uses existing camera activity rather than
-opening additional video streams, minimizing Raspberry Pi CPU usage.
+Send JSON to `POST /api/species-confirmation`. Set `"species": null` to clear a confirmation. The capture must exist and its event must be classified as `bird`.
 
-### Troubleshooting
+**Timezone caveat:** Gallery display supports the configurable IANA timezone, but Bird Activity analytics currently use `America/New_York` in `catcam_activity.py`, and Gallery interprets folder names initially in that timezone. Changing the display timezone is not yet a full system-wide timezone migration.
 
-To check camera health from the Raspberry Pi:
+## Tests and troubleshooting
 
-    curl -s http://192.168.1.201:8080/api/status
+```bash
+cd /home/pi/catcam
+python3 -m unittest -v test_catcam_activity.py
+python3 -m py_compile wildlife_camera.py bird_detection.py catcam_local_ai.py catcam_stats.py catcam_activity.py catcam_gallery.py catcam_cleanup.py catcam_advanced.py
+curl -sS http://192.168.1.201:8080/api/status
+curl -sS 'http://192.168.1.201:8080/api/gallery?mode=bird&page=1'
+sudo journalctl -u catcam.service -n 100 --no-pager
+```
 
-Look for `"camera_live": true` in the response.
+Check Pi 4 local-AI health with the shared token (the unauthenticated endpoint can return `Unauthorized`):
 
-The CatCam web server currently binds to its LAN address.
-Requests to `localhost:8080` may therefore fail.
+```bash
+TOKEN=$(cat /home/pi/catcam_local_ai_token)
+curl -sS --max-time 10 -H "X-CatCam-Token: $TOKEN" http://192.168.1.75:8765/health
+unset TOKEN
+```
 
-To restart CatCam:
+- **Camera offline/checking:** inspect `GET /api/status`, service logs, and camera initialization. The shared header uses recent camera frames, not an extra camera stream.
+- **Gallery missing photos:** non-bird originals may have been removed by retention; thumbnails do not substitute for originals.
+- **No Discord notification:** check event classification, advanced Discord toggle, `/home/pi/.catcam-discord`, environment webhook, and logs.
+- **Pi 4 detection failure:** verify service, matching tokens, synchronized files, network, and timeout; do not interpret failure as a negative detection.
+- **Unexpected species:** review AI confidence, per-photo labels, and human confirmation. Predictions are not verified identifications.
+- **Update blocked:** inspect `git status --short` before pulling; avoid overwriting local edits.
 
-    sudo systemctl restart catcam.service
+## Security and limitations
 
-To inspect its status:
-
-    sudo systemctl status catcam.service --no-pager
+- Designed for a **trusted LAN or VPN**, **not public internet exposure**. The web server has no application-level login or authorization for settings, manual trigger, or species-confirmation writes.
+- Do not commit webhook URLs, service-account credentials, tokens, photo archives, or the runtime database.
+- Pi 4 server/model installation and Syncthing setup are external to this repository.
+- Changing detection settings does not automatically reprocess historical bursts.
+- Existing unit tests focus on Bird Activity logic; hardware capture, browser UI, Discord, and Pi 4 integration require separate end-to-end testing.
