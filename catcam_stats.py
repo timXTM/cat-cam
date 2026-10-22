@@ -272,6 +272,24 @@ def get_dashboard_data(limit=10):
     return {'summary': summary, 'recent': [dict(row) for row in recent_rows]}
 
 
+def set_confirmed_species(folder, species):
+    """Set or clear a human-verified species for a bird-positive burst only."""
+    if species is not None:
+        if not isinstance(species, str):
+            raise ValueError('Species must be text')
+        species = ' '.join(species.strip().split())
+        if not 1 <= len(species) <= 100 or any(ord(c) < 32 for c in species):
+            raise ValueError('Species name must be 1–100 printable characters')
+    with connect() as conn:
+        row = conn.execute('SELECT id, classification FROM events WHERE folder=? ORDER BY id DESC LIMIT 1',
+                           (str(folder),)).fetchone()
+        if not row or row[1] != 'bird':
+            raise ValueError('Bird-positive event not found')
+        conn.execute('UPDATE events SET confirmed_species=?, species_status=? WHERE id=?',
+                     (species, 'confirmed' if species else 'unreviewed', row[0]))
+    return {'confirmed_species': species, 'species_status': 'confirmed' if species else 'unreviewed'}
+
+
 def get_event_details(folder):
     """Safe, read-only classification metadata for a burst and its six photos."""
     import json

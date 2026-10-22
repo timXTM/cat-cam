@@ -260,6 +260,32 @@ class CatCamHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/species-confirmation":
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length <= 2048:
+                    raise ValueError('Invalid request size')
+                data = json.loads(self.rfile.read(length).decode('utf-8'))
+                if not isinstance(data, dict):
+                    raise ValueError('Expected JSON object')
+                date_name, event_name = data.get('date'), data.get('event')
+                if (not isinstance(date_name, str) or not isinstance(event_name, str)
+                    or not re.fullmatch(r'20\d{2}-\d{2}-\d{2}', date_name)
+                    or not re.fullmatch(r'\d{2}-\d{2}-\d{2}', event_name)):
+                    raise ValueError('Invalid capture path')
+                folder = BASE_DIR / date_name / event_name
+                if not folder.is_dir():
+                    raise ValueError('Capture not found')
+                species = data.get('species')
+                result = catcam_stats.set_confirmed_species(folder, species)
+                self.send_body(200, json.dumps({'ok': True, **result}), 'application/json; charset=utf-8')
+            except (ValueError, TypeError, UnicodeError, json.JSONDecodeError) as exc:
+                self.send_body(400, json.dumps({'ok': False, 'message': str(exc)}), 'application/json; charset=utf-8')
+            except OSError as exc:
+                print(f'Species confirmation failed: {exc}', flush=True)
+                self.send_body(500, json.dumps({'ok': False, 'message': 'Unable to save species'}), 'application/json; charset=utf-8')
+            return
+
         if path == "/api/advanced-settings":
             try:
                 length = int(self.headers.get("Content-Length", "0"))
