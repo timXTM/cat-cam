@@ -197,7 +197,7 @@ def _parse_hour(value, field):
 
 
 def get_activity(start=None, end=None, start_hour=None, end_hour=None,
-                 bird_type=None, db_path=DB_PATH):
+                 bird_type=None, db_path=DB_PATH, identification_status=None):
     """Return aggregate counts and matching event identifiers for shared filters.
 
     Date range inclusive; local clock hours inclusive, supports overnight ranges.
@@ -214,6 +214,12 @@ def get_activity(start=None, end=None, start_hour=None, end_hour=None,
     if bird_type is not None and (not isinstance(bird_type, str) or len(bird_type) > 100):
         raise ValueError('Invalid bird_type')
     bird_type = bird_type or None
+
+    allowed_statuses = {'confirmed', 'estimated', 'unidentified'}
+    if identification_status == '':
+        identification_status = None
+    if identification_status is not None and identification_status not in allowed_statuses:
+        raise ValueError('Invalid identification_status')
 
     # Fetch only bird-positive capture events and their first checked positive photo.
     # LEFT JOIN supports older events without photo-level records.
@@ -234,6 +240,7 @@ def get_activity(start=None, end=None, start_hour=None, end_hour=None,
 
     matches = []
     by_hour, by_day, by_type = Counter(), Counter(), Counter()
+    by_status = Counter()
     all_types = set()
     for row in rows:
         labels = _labels(row['photo_labels'])
@@ -243,10 +250,34 @@ def get_activity(start=None, end=None, start_hour=None, end_hour=None,
         ai_species = row['ai_species'] if engine == 'local_ai' else None
         ai_score = row['ai_species_score'] if engine == 'local_ai' else None
         confirmed = row['confirmed_species']
-        if confirmed:
-            species, confidence = confirmed, None
-        elif ai_species:
-            species, confidence = ai_species, ai_score
+        # Keep the AI estimate separate from the human confirmation.
+        estimated_species = (
+            SPECIES_ALIASES.get(ai_species.strip().casefold(), ai_species)
+            if ai_species else species
+        )
+        estimated_confidence = ai_score if ai_species else confidence
+
+        if estimated_species == UNKNOWN:
+            estimated_species = None
+            estimated_confidence = None
+
+        confirmed_normalized = (
+            SPECIES_ALIASES.get(confirmed.strip().casefold(), confirmed)
+            if confirmed else None
+        )
+
+        if confirmed_normalized:
+            species = confirmed_normalized
+            confidence = None
+            status = 'confirmed'
+        elif estimated_species:
+            species = estimated_species
+            confidence = estimated_confidence
+            status = 'estimated'
+        else:
+            species = UNKNOWN
+            confidence = None
+            status = 'unidentified'
         all_types.add(species)
         dt = _local_datetime(row['timestamp'])
         if dt is None:
@@ -262,6 +293,9 @@ def get_activity(start=None, end=None, start_hour=None, end_hour=None,
                 continue
         if bird_type and not matches_bird_type(species, bird_type):
             continue
+        if identification_status and status != identification_status:
+            continue
+        by_status[status] += 1
         by_hour[hour] += 1
         by_day[day.isoformat()] += 1
         by_type[species] += 1
@@ -269,8 +303,17 @@ def get_activity(start=None, end=None, start_hour=None, end_hour=None,
             'id': row['id'], 'timestamp_local': dt.isoformat(),
             'folder': row['folder'], 'trigger_source': row['trigger_source'],
             'bird_type': species, 'species_confidence': confidence,
+             'estimated_species': estimated_species,
+             'estimated_confidence': estimated_confidence,
+             'confirmed_species_display': confirmed_normalized,
+             'identification_status': status,
              'detection_engine': engine, 'ai_species': ai_species,
-             'ai_species_score': ai_score, 'confirmed_species': confirmed,
+             'ai_species_score': ai_score,
+              'ai_common_name': (
+                  SPECIES_ALIASES.get(ai_species.strip().casefold())
+                  if ai_species else None
+              ),
+              'confirmed_species': confirmed,
              'species_status': row['species_status'] or 'unreviewed',
              'first_bird_photo': row['first_bird_photo'],
             'labels': labels,
@@ -281,8 +324,14 @@ def get_activity(start=None, end=None, start_hour=None, end_hour=None,
         'description': 'One event per capture burst with a confirmed bird detection; not individual bird visits.',
         'timezone': catcam_advanced.get('timezone'),
         'filters': {'start': start, 'end': end, 'start_hour': from_hour,
-                    'end_hour': to_hour, 'bird_type': bird_type},
+                    'end_hour': to_hour, 'bird_type': bird_type,
+                     'identification_status': identification_status},
         'total_events': len(matches),
+        'identification_counts': {
+            'confirmed': by_status['confirmed'],
+            'estimated': by_status['estimated'],
+            'unidentified': by_status['unidentified'],
+        },
         'by_hour': [{'hour': h, 'events': by_hour[h]} for h in range(24)],
         'by_day': [{'date': d, 'events': n} for d, n in sorted(by_day.items())],
         'by_bird_type': [{'bird_type': s, 'events': n}

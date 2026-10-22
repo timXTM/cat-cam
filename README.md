@@ -8,15 +8,21 @@ CatCam is a self-hosted bird-feeder camera running on a Raspberry Pi Zero W. It 
 
 ## Features
 
-- Live MJPEG preview, camera-health status, manual trigger, motion ROI and threshold, focus/autofocus, and mounting orientation/rotation.
-- Six full-resolution photographs per burst, background thumbnail cache, date/time-organized archive.
-- Two detection engines: Google Vision label detection and Pi 4 local AI (YOLOv4-tiny bird detection with optional AIY Birds species estimation on the external server).
-- Bird-positive bursts retained; optional Discord delivery of all six images. Conservatively delete fully classified non-bird bursts after the configured retention (default: 24 hours).
-- Dashboard and Settings; paginated Gallery with classification/species/date/hour/sort filters; Bird Activity charts; burst detail pages.
-- Gallery thumbnail clicks open the burst with that specific photograph enlarged; the viewer has labels, previous/next controls, and an **Open original** link. Thumbnail cards remain aligned when labels differ in length.
-- Human species confirmation per bird-positive burst. Confirmations are separate from, and take precedence over, AIY/Google Vision estimates; they can be edited or cleared.
-- Shared navigation/header and consistent camera-health indicators across pages; light/dark theme.
-- SQLite event, photo detection, Google Vision usage, and confirmed-species records.
+- Live MJPEG preview, camera-health status, manual trigger, configurable motion ROI and threshold, focus/autofocus, and mounting orientation.
+- Six full-resolution photographs per burst, thumbnail cache, and date/time-organized archive.
+- Two detection engines: Google Cloud Vision and authenticated Pi 4 Local AI (YOLO bird detection with optional AIY Birds species identification).
+- Photo-by-photo detection records, including checked photographs, first bird-positive photograph, species estimates, and confidence scores.
+- English common names displayed alongside scientific names for AIY species identifications.
+- Bird-positive bursts retained and optionally delivered to Discord with all six photographs.
+- Conservative cleanup of fully classified non-bird bursts after the configured retention period.
+- Dashboard, Settings, paginated Gallery, burst details, and Bird Activity analytics.
+- Searchable species-confirmation dropdown with the ability to add new species.
+- Persistent SQLite species catalog with case-insensitive duplicate prevention.
+- Manual species confirmations stored separately from original AI estimates.
+- Bird Activity identification-status filters: All, AI estimated, Manually confirmed, and Unidentified.
+- Separate AI Estimate and Confirmed Species columns, plus identification-status summary counters.
+- Shared navigation/header, camera-health indicators, and consistent light/dark theme.
+- SQLite event history, photo-level detections, API usage, and species confirmations.
 
 ## Hardware and topology
 
@@ -60,7 +66,8 @@ The case is part of the physical build; its printable design files are not inclu
 | `catcam.service` | Example systemd unit |
 | `update.sh` | Guarded Git update, restart, and rollback helper |
 | `requirements.txt` | Python dependency notes |
-| `test_catcam_activity.py` | Unit tests for analytics and classification heuristics |
+| `test_catcam_activity.py` | Bird Activity analytics and identification tests |
+| `test_catcam_species.py` | Species catalog and manual confirmation tests |
 | `install_catcam_bird_activity.py`, `install_catcam_bird_type_gallery.py` | Older installation/migration helpers, not the standard update path |
 
 ## Installation and operation on the Pi Zero
@@ -127,11 +134,51 @@ The Discord file toggle is enabled with `touch /home/pi/.catcam-discord` and dis
 
 ## Species identification and manual confirmation
 
-- Google Vision labels are mapped to species/broader bird types using heuristics in `catcam_activity.py`. Specific labels require at least **65%** confidence and a **10-percentage-point** lead over a competing species; otherwise a confident broader type may be used. A generic `Bird` label is `Unknown bird type`.
-- Local AI can save `ai_species` and `ai_species_score`; these are model estimates, not human verification.
-- In a bird-positive burst's detail page, enter a species name in the confirmation form and save it. Confirmations are **per burst**, not per photo. You can edit or clear the confirmation.
-- `confirmed_species` and `species_status` are stored separately from AIY output. Gallery and Bird Activity prioritize a confirmed species; clearing it restores the unreviewed state and retains model estimates.
-- Saving a confirmation does not rerun detection, change images, or consume Google Vision requests.
+CatCam distinguishes automated species estimates from human-confirmed identifications.
+
+### Automated identification
+
+- Google Vision labels are interpreted using the species and broader-category rules in `catcam_activity.py`.
+- Local AI can return an AIY scientific species name and confidence score.
+- Known scientific names are translated to English common names using CatCam's species aliases.
+- The original AI estimate remains stored even when a person confirms a different species.
+- Automated predictions are estimates, not verified identifications.
+
+### Manual confirmation
+
+Open a bird-positive burst's Event Details page to confirm its species.
+
+1. Select a species using the searchable dropdown.
+2. If the species is missing, select **Add new species**.
+3. Enter the new species name and save it to the catalog.
+4. Select the species and confirm the identification.
+
+Adding a new species does not automatically confirm the current burst.
+
+Species added by users are stored in the SQLite `species_catalog` table and remain available for future confirmations. The catalog combines built-in species with user-added entries.
+
+Confirmations are saved per burst, not per photograph. They can be changed or cleared.
+
+CatCam stores `confirmed_species` and `species_status` separately from the original AI estimate. A confirmed species takes precedence in Gallery and Bird Activity displays, while the original estimate remains available for comparison.
+
+Only bird-positive events can receive manual confirmations. Unknown species must first be added to the catalog. Invalid species names, including names containing control characters, are rejected.
+
+Saving or clearing a confirmation does not rerun detection, modify photographs, or consume Google Vision requests.
+
+### Bird Activity identification status
+
+Bird Activity includes an Identification Status filter:
+
+- **All:** All matching bird-positive events.
+- **AI estimated:** A species estimate exists without manual confirmation.
+- **Manually confirmed:** A person has confirmed the species.
+- **Unidentified:** No species estimate or confirmation is available.
+
+The Bird Type filter remains available and uses the best identification: human confirmation when present, otherwise the automated estimate.
+
+The event table includes separate AI Estimate and Confirmed Species columns, allowing the original prediction to remain visible.
+
+Summary counters distinguish confirmed, estimated, and unidentified events. Counts represent capture events (bursts), not individual photographs or unique bird visits.
 
 ## Web interface and API
 
@@ -150,6 +197,8 @@ The Discord file toggle is enabled with `touch /home/pi/.catcam-discord` and dis
 | `POST /api/advanced-settings` | Update advanced settings |
 | `POST /settings` | Save basic camera settings |
 | `POST /trigger` | Manual capture request |
+| `GET /api/species-options` | List available species, including user-added entries |
+| `POST /api/species-add` | Add a species to the persistent SQLite catalog |
 | `POST /api/species-confirmation` | Set or clear species for a bird-positive burst |
 | `/stream.mjpg` | Live MJPEG |
 | `/photo/...`, `/thumb/...` | Full JPEG and cached thumbnail |
@@ -168,13 +217,64 @@ Species confirmation request body:
 
 Send JSON to `POST /api/species-confirmation`. Set `"species": null` to clear a confirmation. The capture must exist and its event must be classified as `bird`.
 
+
+### Species catalog API
+
+`GET /api/species-options` returns the available species for the searchable confirmation dropdown.
+
+`POST /api/species-add` accepts a JSON object containing a species name.
+
+Example request body:
+
+    {"species": "Purple finch"}
+
+User-added species persist in SQLite and are available for future confirmations. Adding a species does not automatically confirm the current event.
+
+### Identification-status filtering
+
+`GET /api/bird-activity` supports the existing date, hour, and bird-type filters, plus the optional `identification_status` parameter.
+
+Accepted values:
+
+- `confirmed` — manually confirmed species.
+- `estimated` — AI-estimated species without manual confirmation.
+- `unidentified` — no species estimate or confirmation.
+
+Omit the parameter to include all identification statuses.
+
+The Bird Activity response includes identification-status summary counts and separate AI-estimated and confirmed species information.
+
 **Timezone caveat:** Gallery display supports the configurable IANA timezone, but Bird Activity analytics currently use `America/New_York` in `catcam_activity.py`, and Gallery interprets folder names initially in that timezone. Changing the display timezone is not yet a full system-wide timezone migration.
 
 ## Tests and troubleshooting
 
+### Automated test coverage
+
+The current automated suites contain 17 tests:
+
+- 9 Bird Activity tests covering analytics, species estimates, confirmations, and identification-status filtering.
+- 8 species tests covering the persistent catalog, duplicates, validation, confirmations, and clearing confirmations.
+
+The species tests use temporary SQLite databases rather than the production database.
+
+### Configurable database path
+
+The production SQLite database defaults to:
+
+    /home/pi/catcam_data/catcam_stats.db
+
+For isolated testing, set the `CATCAM_STATS_DB_PATH` environment variable before importing `catcam_stats.py`.
+
+This override is intended for testing and controlled deployments. Do not change the production database path without planning a data migration.
+
+### Validation limitations
+
+Unit tests and static JavaScript checks do not replace live browser, HTTP, camera, Discord, or Pi 4 integration testing.
+
+
 ```bash
 cd /home/pi/catcam
-python3 -m unittest -v test_catcam_activity.py
+python3 -m unittest -v test_catcam_activity.py test_catcam_species.py
 python3 -m py_compile wildlife_camera.py bird_detection.py catcam_local_ai.py catcam_stats.py catcam_activity.py catcam_gallery.py catcam_cleanup.py catcam_advanced.py
 curl -sS http://192.168.1.201:8080/api/status
 curl -sS 'http://192.168.1.201:8080/api/gallery?mode=bird&page=1'

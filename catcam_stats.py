@@ -2,7 +2,14 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime, timezone
 
-DB_PATH = Path("/home/pi/catcam_data/catcam_stats.db")
+import os
+
+DB_PATH = Path(
+    os.environ.get(
+        "CATCAM_STATS_DB_PATH",
+        "/home/pi/catcam_data/catcam_stats.db"
+    )
+)
 MONTHLY_API_LIMIT = 900
 
 
@@ -272,14 +279,91 @@ def get_dashboard_data(limit=10):
     return {'summary': summary, 'recent': [dict(row) for row in recent_rows]}
 
 
+
+def get_species_options():
+    """Return built-in and user-added species as one searchable list."""
+    from catcam_activity import SPECIES_ALIASES
+
+    species = {
+        name.casefold(): name
+        for name in SPECIES_ALIASES.values()
+    }
+
+    with connect() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS species_catalog (
+                name TEXT PRIMARY KEY COLLATE NOCASE
+            )
+        """)
+        rows = conn.execute(
+            "SELECT name FROM species_catalog"
+        ).fetchall()
+
+    for (name,) in rows:
+        species[name.casefold()] = name
+
+    return sorted(species.values(), key=str.casefold)
+
+
+def add_species(name):
+    """Add a species to the persistent manual-confirmation catalog."""
+    if not isinstance(name, str):
+        raise ValueError("Species name must be text")
+
+    if any(ord(char) < 32 or ord(char) == 127 for char in name):
+        raise ValueError("Species name contains invalid control characters")
+
+    name = " ".join(name.strip().split())
+
+    if not 1 <= len(name) <= 100:
+        raise ValueError("Species name must contain 1–100 characters")
+
+    if any(ord(char) < 32 for char in name):
+        raise ValueError("Species name contains invalid characters")
+
+    existing = {
+        species.casefold(): species
+        for species in get_species_options()
+    }
+
+    if name.casefold() in existing:
+        return {
+            "species": existing[name.casefold()],
+            "added": False
+        }
+
+    with connect() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS species_catalog (
+                name TEXT PRIMARY KEY COLLATE NOCASE
+            )
+        """)
+        conn.execute(
+            "INSERT OR IGNORE INTO species_catalog (name) VALUES (?)",
+            (name,)
+        )
+
+    return {"species": name, "added": True}
+
+
 def set_confirmed_species(folder, species):
     """Set or clear a human-verified species for a bird-positive burst only."""
     if species is not None:
         if not isinstance(species, str):
             raise ValueError('Species must be text')
+        if any(ord(c) < 32 or ord(c) == 127 for c in species):
+            raise ValueError('Species contains invalid control characters')
         species = ' '.join(species.strip().split())
         if not 1 <= len(species) <= 100 or any(ord(c) < 32 for c in species):
             raise ValueError('Species name must be 1–100 printable characters')
+
+        recognized = {
+            name.casefold(): name
+            for name in get_species_options()
+        }
+        if species.casefold() not in recognized:
+            raise ValueError('Select a recognized species or add it to the catalog first')
+        species = recognized[species.casefold()]
     with connect() as conn:
         row = conn.execute('SELECT id, classification FROM events WHERE folder=? ORDER BY id DESC LIMIT 1',
                            (str(folder),)).fetchone()
@@ -288,6 +372,14 @@ def set_confirmed_species(folder, species):
         conn.execute('UPDATE events SET confirmed_species=?, species_status=? WHERE id=?',
                      (species, 'confirmed' if species else 'unreviewed', row[0]))
     return {'confirmed_species': species, 'species_status': 'confirmed' if species else 'unreviewed'}
+
+
+def ai_common_name(scientific_name):
+    """Return a display-only common name for an AIY scientific name."""
+    if not scientific_name:
+        return None
+    from catcam_activity import SPECIES_ALIASES
+    return SPECIES_ALIASES.get(scientific_name.strip().casefold())
 
 
 def get_event_details(folder):
@@ -316,6 +408,31 @@ def get_event_details(folder):
             'labels': json.loads(row['labels_json'] or '[]')
         }
     first = event['first_bird_photo']
+
+    # Reconstruct historical Local AI photo status without rerunning AI.
+    # YOLO checks photos sequentially and stops at the first bird.
+    if event['detection_engine'] == 'local_ai' and event['classification'] in ('bird', 'no_bird'):
+        count = first if event['classification'] == 'bird' else 6
+
+        if count is not None and 1 <= count <= 6:
+            for number in range(1, count + 1):
+                name = f'{number:02d}.jpg'
+
+                if name not in photo_data:
+                    photo_data[name] = {
+                        'checked': True,
+                        'bird_detected': (
+                            event['classification'] == 'bird'
+                            and number == first
+                        ),
+                        'confidence': None,
+                        'labels': (
+                            [event['ai_species']]
+                            if number == first and event['ai_species']
+                            else []
+                        )
+                    }
+
     labels = json.loads(event['bird_labels_json'] or '[]')
     # Normalize both legacy Google Vision dictionaries and new plain-string labels.
     def label_name(value):
@@ -345,6 +462,11 @@ def get_event_details(folder):
         'classification': event['classification'],
         'detection_engine': event['detection_engine'] or 'google_vision',
         'ai_species': event['ai_species'],
+        'ai_common_name': (
+            ai_common_name(event['ai_species'])
+            if event['detection_engine'] == 'local_ai'
+            else None
+        ),
         'ai_species_score': event['ai_species_score'],
         'confirmed_species': event['confirmed_species'],
         'species_status': event['species_status'],

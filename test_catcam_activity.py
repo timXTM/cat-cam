@@ -15,7 +15,12 @@ class ActivityTests(unittest.TestCase):
             conn.executescript('''
                 CREATE TABLE events (id INTEGER PRIMARY KEY, timestamp TEXT, folder TEXT,
                                      trigger_source TEXT, classification TEXT,
-                                     first_bird_photo INTEGER, bird_labels_json TEXT);
+                                     first_bird_photo INTEGER, bird_labels_json TEXT,
+                                     detection_engine TEXT,
+                                     ai_species TEXT,
+                                     ai_species_score REAL,
+                                     confirmed_species TEXT,
+                                     species_status TEXT);
                 CREATE TABLE photo_detections (event_id INTEGER, photo_path TEXT,
                                                bird_detected INTEGER, labels_json TEXT);
             ''')
@@ -25,7 +30,10 @@ class ActivityTests(unittest.TestCase):
                 (3, '2026-10-19T03:00:00+00:00', '/photos/3', 'manual', 'no_bird', None, '[]'),
                 (4, '2026-10-19T12:00:00+00:00', '/photos/4', 'motion', 'bird', 1, '[]'),
             ]
-            conn.executemany('INSERT INTO events VALUES (?,?,?,?,?,?,?)', entries)
+            conn.executemany('''INSERT INTO events
+                (id, timestamp, folder, trigger_source, classification,
+                 first_bird_photo, bird_labels_json)
+                VALUES (?,?,?,?,?,?,?)''', entries)
             conn.executemany('INSERT INTO photo_detections VALUES (?,?,?,?)', [
                 (1, '01.jpg', 1, json.dumps([{'name':'Bird','confidence':.96}, {'name':'Northern cardinal','confidence':.81}])),
                 (2, '02.jpg', 1, json.dumps([{'name':'House finch','confidence':.83}])),
@@ -72,6 +80,89 @@ class ActivityTests(unittest.TestCase):
     def test_bad_filter(self):
         with self.assertRaises(ValueError):
             get_activity(start_hour='3', db_path=self.db)
+
+
+    def test_ai_estimate_and_manual_confirmation(self):
+        import sqlite3
+
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("""
+                UPDATE events
+                SET detection_engine='local_ai',
+                    ai_species='Cardinalis cardinalis',
+                    ai_species_score=0.91,
+                    confirmed_species='House finch',
+                    species_status='confirmed'
+                WHERE id=1
+            """)
+
+        data = get_activity(db_path=self.db)
+        event = next(e for e in data['events'] if e['id'] == 1)
+
+        self.assertEqual(event['bird_type'], 'House finch')
+        self.assertEqual(event['estimated_species'], 'Northern cardinal')
+        self.assertEqual(event['confirmed_species_display'], 'House finch')
+        self.assertEqual(event['identification_status'], 'confirmed')
+        self.assertAlmostEqual(event['estimated_confidence'], 0.91)
+
+    def test_identification_status_filters(self):
+        import sqlite3
+
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("""
+                UPDATE events
+                SET detection_engine='local_ai',
+                    ai_species='Cardinalis cardinalis',
+                    ai_species_score=0.91,
+                    confirmed_species='House finch',
+                    species_status='confirmed'
+                WHERE id=1
+            """)
+
+            # Make event 4 a bird-positive burst without species identification.
+            conn.execute("""
+                UPDATE photo_detections
+                SET labels_json='[]'
+                WHERE event_id=4
+            """)
+
+        all_events = get_activity(db_path=self.db)
+
+        self.assertEqual(all_events['total_events'], 3)
+        self.assertEqual(
+            all_events['identification_counts'],
+            {'confirmed': 1, 'estimated': 1, 'unidentified': 1}
+        )
+
+        expected = {
+            'confirmed': 1,
+            'estimated': 2,
+            'unidentified': 4,
+        }
+
+        for status, event_id in expected.items():
+            with self.subTest(status=status):
+                result = get_activity(
+                    identification_status=status,
+                    db_path=self.db
+                )
+
+                self.assertEqual(result['total_events'], 1)
+                self.assertEqual(result['events'][0]['id'], event_id)
+                self.assertEqual(
+                    result['events'][0]['identification_status'],
+                    status
+                )
+                self.assertEqual(
+                    result['identification_counts'][status], 1
+                )
+
+    def test_invalid_identification_status(self):
+        with self.assertRaises(ValueError):
+            get_activity(
+                identification_status='invalid',
+                db_path=self.db
+            )
 
 
 if __name__ == '__main__':

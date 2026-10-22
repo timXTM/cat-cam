@@ -28,7 +28,22 @@
 <section class="species-editor" id="speciesEditor" hidden>
   <h2>Manually confirm bird species</h2>
   <p class="hint" id="speciesHint">AI species predictions are estimates until you confirm them.</p>
-  <div class="fields"><input id="speciesName" type="text" maxlength="100" placeholder="e.g., Northern Cardinal" aria-label="Confirmed species name"><button id="confirmSpecies" type="button">Confirm species</button><button id="clearSpecies" class="secondary" type="button" hidden>Remove confirmation</button></div>
+  <div class="fields"><input id="speciesName" type="text" list="speciesOptions" maxlength="100" placeholder="e.g., Northern Cardinal" aria-label="Confirmed species name"><button id="confirmSpecies" type="button">Confirm species</button><button id="clearSpecies" class="secondary" type="button" hidden>Remove confirmation</button></div>
+  <datalist id="speciesOptions"></datalist>
+  <div style="margin-top:10px">
+    <button id="addSpeciesButton" class="secondary" type="button">
+      + Add new species
+    </button>
+  </div>
+  <div id="newSpeciesForm" hidden style="margin-top:12px">
+    <label for="newSpeciesName">New species (common English name)</label>
+    <div class="fields">
+      <input id="newSpeciesName" type="text" maxlength="100"
+             placeholder="e.g., Carolina wren">
+      <button id="saveNewSpecies" type="button">Save new species</button>
+      <button id="cancelNewSpecies" class="secondary" type="button">Cancel</button>
+    </div>
+  </div>
   <div id="speciesMessage" role="status" aria-live="polite"></div>
 </section>
 <div class="photo-grid" id="photoGrid"></div>
@@ -42,23 +57,26 @@ const detection=EVENT_DATA.detection||{};
 function labelNames(values){return (Array.isArray(values)?values:[]).map(v=>
   typeof v==='string'?v:(v&&typeof v==='object'?String(v.name||v.description||''):'')).filter(Boolean)}
 const labels=labelNames(detection.bird_labels);
+function aiName(){
+  if(!detection.ai_species)return null;
+  return detection.ai_common_name
+    ? detection.ai_common_name+' ('+detection.ai_species+')'
+    : detection.ai_species;
+}
 const burstSummary=document.getElementById('burstDetection');
 if(detection.classification==='bird'){
   const source=detection.detection_engine==='local_ai'?'Local AI (YOLO + AIY Birds)':'Google Vision';
-  const chosen=detection.confirmed_species||detection.ai_species;
+  const chosen=detection.confirmed_species||aiName();
   const status=detection.confirmed_species?'Manually confirmed':detection.ai_species?'AIY estimate':'Unidentified';
   const score=detection.ai_species_score==null?'':` (${(100*Number(detection.ai_species_score)).toFixed(1)}% AIY confidence)`;
   burstSummary.textContent=`🐦 Bird detected in photo ${detection.first_bird_photo||'?'} · ${source}. `+
     (chosen?`${status}: ${chosen}${detection.confirmed_species?'':score}. `:'Species not identified. ')+
-    (labels.length?'Detection labels: '+labels.join(', ')+'.':'');
+    (detection.detection_engine==='google_vision'&&labels.length?'Google Vision labels: '+labels.join(', ')+'.':'');
 }else if(detection.classification==='no_bird'){
   burstSummary.textContent='No bird detected. All six photos were analyzed.';
 }else{
   burstSummary.textContent='Classification: '+(detection.classification||'not available')+'.';
 }
-const darkToggle=document.getElementById('darkToggle');
-function setDark(dark){document.body.classList.toggle('dark',dark);darkToggle.checked=dark;localStorage.setItem('catcam-dark',dark?'1':'0')}
-darkToggle.addEventListener('change',()=>setDark(darkToggle.checked));setDark(localStorage.getItem('catcam-dark')==='1');
 document.getElementById('crumbDate').textContent=date;
 document.getElementById('title').textContent=date+' · '+event.replaceAll('-',':');
 document.getElementById('photoCount').textContent=photos.length+' photos';
@@ -74,9 +92,9 @@ function photoDescription(photo){
     parts.push('🐦 Bird detected by '+engine);
     if(result.confidence!=null)parts.push('Detection confidence: '+(100*Number(result.confidence)).toFixed(1)+'%');
     const names=labelNames(result.labels);
-    if(names.length)parts.push('Labels: '+names.join(', '));
+    if(names.length&&detection.detection_engine!=='local_ai')parts.push('Google Vision labels: '+names.join(', '));
     if(detection.confirmed_species)parts.push('Confirmed species (burst): '+detection.confirmed_species);
-    else if(detection.ai_species)parts.push('AIY estimate (burst): '+detection.ai_species+(detection.ai_species_score==null?'':' · '+(100*Number(detection.ai_species_score)).toFixed(1)+'%'));
+    else if(detection.ai_species)parts.push('AIY estimate: '+aiName()+(detection.ai_species_score==null?'':' · '+(100*Number(detection.ai_species_score)).toFixed(1)+'% AIY confidence'));
   }else if(result?.checked){parts.push('Checked · No bird detected');}
   else{parts.push('Not analyzed');}
   return parts.join(' · ');
@@ -104,14 +122,117 @@ if(requestedPhoto){const index=photos.findIndex(p=>p.url.split('/').pop()===requ
 if(detection.classification==='bird'){
   const editor=document.getElementById('speciesEditor');editor.hidden=false;
   const name=document.getElementById('speciesName');
+   const speciesOptions=document.getElementById('speciesOptions');
+   let availableSpecies=[];
+   const confirmButton=document.getElementById('confirmSpecies');
+   confirmButton.disabled=true;
+   fetch('/api/species-options')
+     .then(response=>{
+       if(!response.ok)throw Error('Species list unavailable');
+       return response.json();
+     })
+     .then(data=>{
+       availableSpecies=data.species||[];
+       if(!availableSpecies.length)throw Error('Species list is empty');
+       confirmButton.disabled=false;
+       for(const species of availableSpecies){
+         const option=document.createElement('option');
+         option.value=species;
+         speciesOptions.appendChild(option);
+       }
+     })
+     .catch(error=>{
+       console.warn(error);
+       confirmButton.disabled=true;
+       message.textContent='Species list unavailable. Please reload the page.';
+     });
   const message=document.getElementById('speciesMessage');
+
+   const addButton=document.getElementById('addSpeciesButton');
+   const newForm=document.getElementById('newSpeciesForm');
+   const newName=document.getElementById('newSpeciesName');
+   const saveNew=document.getElementById('saveNewSpecies');
+   const cancelNew=document.getElementById('cancelNewSpecies');
+
+   addButton.addEventListener('click',()=>{
+     newForm.hidden=false;
+     newName.value='';
+     newName.focus();
+   });
+
+   cancelNew.addEventListener('click',()=>{
+     newForm.hidden=true;
+     newName.value='';
+   });
+
+   saveNew.addEventListener('click',async()=>{
+     const species=newName.value.trim();
+
+     if(!species){
+       message.textContent='Enter a species name.';
+       return;
+     }
+
+     saveNew.disabled=true;
+     message.textContent='Adding species…';
+
+     try{
+       const response=await fetch('/api/species-add',{
+         method:'POST',
+         headers:{'Content-Type':'application/json'},
+         body:JSON.stringify({species})
+       });
+
+       const result=await response.json();
+
+       if(!response.ok){
+         throw Error(result.message||'Could not add species');
+       }
+
+       const saved=result.species;
+
+       if(!availableSpecies.some(
+         item=>item.toLowerCase()===saved.toLowerCase()
+       )){
+         availableSpecies.push(saved);
+         availableSpecies.sort((a,b)=>a.localeCompare(b));
+
+         const option=document.createElement('option');
+         option.value=saved;
+         speciesOptions.appendChild(option);
+       }
+
+       name.value=saved;
+       confirmButton.disabled=false;
+       newForm.hidden=true;
+
+       message.textContent=result.added
+         ?'✓ New species added. Click Confirm species to apply it.'
+         :'Species already exists. Click Confirm species to apply it.';
+
+     }catch(error){
+       message.textContent='Error: '+error.message;
+     }finally{
+       saveNew.disabled=false;
+     }
+   });
   const clear=document.getElementById('clearSpecies');
   name.value=detection.confirmed_species||detection.ai_species||'';
   clear.hidden=!detection.confirmed_species;
   document.getElementById('speciesHint').textContent=detection.confirmed_species?
     'Confirmed: '+detection.confirmed_species+'. You can correct or remove this identification.':
-    (detection.ai_species?'AIY estimate: '+detection.ai_species+'. Confirm or correct it after reviewing the photos.':'Enter the species you identified in these photos.');
+    (detection.ai_species?'AIY estimate: '+aiName()+'. Confirm or correct it after reviewing the photos.':'Enter the species you identified in these photos.');
   async function saveSpecies(species){
+     if(species){
+       const selected=availableSpecies.find(
+         item=>item.toLowerCase()===species.toLowerCase()
+       );
+       if(!selected){
+         message.textContent='Select a species from the suggested list.';
+         return;
+       }
+       if(selected)species=selected;
+     }
     const confirm=document.getElementById('confirmSpecies');
     confirm.disabled=true;clear.disabled=true;message.textContent='Saving…';
     try{
@@ -125,7 +246,7 @@ if(detection.classification==='bird'){
       document.getElementById('speciesHint').textContent=data.confirmed_species?'Manually confirmed: '+data.confirmed_species:'Not manually confirmed.';
       if(detection.classification==='bird'){
         const source=detection.detection_engine==='local_ai'?'Local AI':'Google Vision';
-        burstSummary.textContent='🐦 Bird detected · '+source+' · '+(data.confirmed_species?'Confirmed species: '+data.confirmed_species:detection.ai_species?'AIY estimate: '+detection.ai_species:'Species unidentified');
+        burstSummary.textContent='🐦 Bird detected · '+source+' · '+(data.confirmed_species?'Confirmed species: '+data.confirmed_species:detection.ai_species?'AIY estimate: '+aiName():'Species unidentified');
       }
       if(!lightbox.hidden)document.getElementById('photoMetadata').textContent=photoDescription(photos[selected]);
     }catch(err){message.textContent='Error: '+err.message}

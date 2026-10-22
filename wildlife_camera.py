@@ -260,6 +260,35 @@ class CatCamHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/species-add":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 4096:
+                    raise ValueError("Invalid request size")
+                data = json.loads(self.rfile.read(length).decode("utf-8"))
+                if not isinstance(data, dict):
+                    raise ValueError("Expected species object")
+                result = catcam_stats.add_species(data.get("species"))
+                self.send_body(
+                    200,
+                    json.dumps({"ok": True, **result}),
+                    "application/json; charset=utf-8"
+                )
+            except (ValueError, TypeError, UnicodeError, json.JSONDecodeError) as exc:
+                self.send_body(
+                    400,
+                    json.dumps({"ok": False, "message": str(exc)}),
+                    "application/json; charset=utf-8"
+                )
+            except OSError as exc:
+                print(f"Adding species failed: {exc}", flush=True)
+                self.send_body(
+                    500,
+                    json.dumps({"ok": False, "message": "Unable to add species"}),
+                    "application/json; charset=utf-8"
+                )
+            return
+
         if path == "/api/species-confirmation":
             try:
                 length = int(self.headers.get('Content-Length', '0'))
@@ -457,6 +486,15 @@ class CatCamHandler(BaseHTTPRequestHandler):
             return
 
 
+        if path == "/api/species-options":
+            species = catcam_stats.get_species_options()
+            self.send_body(
+                200,
+                json.dumps({'species': species}),
+                "application/json; charset=utf-8"
+            )
+            return
+
         if path == "/api/bird-activity":
             try:
                 import catcam_activity
@@ -472,6 +510,7 @@ class CatCamHandler(BaseHTTPRequestHandler):
                     start_hour=param("start_hour"),
                     end_hour=param("end_hour"),
                     bird_type=param("bird_type"),
+                    identification_status=param("identification_status"),
                 )
 
                 self.send_body(
@@ -811,7 +850,9 @@ def send_discord_notification(
     event_timestamp,
     first_bird_photo=None,
     bird_labels=None,
-    detection_engine='google_vision'
+    detection_engine='google_vision',
+    ai_species=None,
+    ai_common_name=None
 ):
     """
     Send ONE Discord webhook message containing all six
@@ -845,6 +886,11 @@ def send_discord_notification(
     )
 
     labels_text = ", ".join(str(label) for label in (bird_labels or [])[:8]) or "No descriptive labels"
+    if detection_engine == 'local_ai' and ai_species:
+        labels_text = (
+            f"{ai_common_name} ({ai_species})"
+            if ai_common_name else ai_species
+        )
     labels_source = (
         "AIY species estimate"
         if detection_engine == "local_ai"
@@ -1087,6 +1133,33 @@ def bird_detection_worker():
                         species_score = result.get('species_score') if outcome == 'bird' else None
                         if species_score is not None:
                             species_score = float(species_score)
+                        # Local AI checks photos in order and stops at the first bird.
+                        checked_count = int(result.get('photos_checked', 0))
+                        if not 0 <= checked_count <= len(photos):
+                            raise ValueError('Invalid Local AI photos_checked count')
+                        if outcome == 'bird' and (
+                            checked_count == 0
+                            or photos[checked_count - 1].name != photo_name
+                        ):
+                            raise ValueError('Local AI photo sequence mismatch')
+                        if outcome == 'no_bird' and checked_count != len(photos):
+                            raise ValueError('Incomplete Local AI classification')
+
+                        catcam_stats.save_photo_detections(event_id, [
+                            {
+                                'photo': photo,
+                                'bird_detected': outcome == 'bird'
+                                                 and photo.name == photo_name,
+                                'bird_confidence': (
+                                    result.get('yolo_confidence') or 0
+                                ) if photo.name == photo_name else 0,
+                                'bird_labels': (
+                                    [species] if species else []
+                                ) if photo.name == photo_name else []
+                            }
+                            for photo in photos[:checked_count]
+                        ])
+
                         catcam_stats.update_event(
                             event_id, classification=outcome,
                             bird_photo_count=1 if outcome == 'bird' else 0,
@@ -1194,7 +1267,9 @@ def bird_detection_worker():
                 all_photos, event_dir, motion_percent or 0.0, event_timestamp,
                 first_bird_photo=detection['first_bird_photo'],
                 bird_labels=detection['bird_labels'],
-                detection_engine=detection['detection_engine']
+                detection_engine=detection['detection_engine'],
+                ai_species=detection.get('ai_species'),
+                ai_common_name=detection.get('ai_common_name')
             )
             if success:
                 catcam_stats.update_event(
