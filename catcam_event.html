@@ -111,7 +111,13 @@ function aiName(){
     : detection.ai_species;
 }
 const burstSummary=document.getElementById('burstDetection');
-if(detection.classification==='bird'){
+if(detection.classification==='bird' && detection.confirmed_species &&
+   detection.original_ai_classification &&
+   detection.original_ai_classification!=='bird'){
+  burstSummary.textContent='🐦 Bird · Manually confirmed: '+
+    detection.confirmed_species+
+    ' · Original AI result: '+detection.original_ai_classification;
+}else if(detection.classification==='bird'){
   const source=detection.detection_engine==='local_ai'?'Local AI (YOLO + AIY Birds)':'Google Vision';
   const chosen=detection.confirmed_species||aiName();
   const status=detection.confirmed_species?'Manually confirmed':detection.ai_species?'AIY estimate':'Unidentified';
@@ -330,8 +336,8 @@ photos.forEach((photo,index)=>{const button=document.createElement('button');but
 const requestedPhoto=new URLSearchParams(location.search).get('photo');
 if(requestedPhoto){const index=photos.findIndex(p=>p.url.split('/').pop()===requestedPhoto);if(index>=0)showPhoto(index)}
 
-// Manual review changes species metadata only; it does not alter the AIY prediction.
-if(detection.classification==='bird'){
+// Manual review can override classification without changing the AI prediction.
+if(true){
   const editor=document.getElementById('speciesEditor');editor.hidden=false;
   const name=document.getElementById('speciesName');
    const speciesOptions=document.getElementById('speciesOptions');
@@ -452,13 +458,23 @@ if(detection.classification==='bird'){
       const data=await res.json();if(!res.ok)throw Error(data.message||'Could not save');
       detection.confirmed_species=data.confirmed_species;
       detection.species_status=data.species_status;
+      detection.classification=data.classification;
+      detection.original_ai_classification=data.original_ai_classification;
       clear.hidden=!data.confirmed_species;
       name.value=data.confirmed_species||detection.ai_species||'';
       message.textContent=data.confirmed_species?'✓ Species confirmed: '+data.confirmed_species:'Confirmation removed. AIY estimate retained.';
       document.getElementById('speciesHint').textContent=data.confirmed_species?'Manually confirmed: '+data.confirmed_species:'Not manually confirmed.';
-      if(detection.classification==='bird'){
-        const source=detection.detection_engine==='local_ai'?'Local AI':'Google Vision';
-        burstSummary.textContent='🐦 Bird detected · '+source+' · '+(data.confirmed_species?'Confirmed species: '+data.confirmed_species:detection.ai_species?'AIY estimate: '+aiName():'Species unidentified');
+      if(data.confirmed_species){
+        const missed=data.original_ai_classification!=='bird';
+        burstSummary.textContent='🐦 Bird · Manually confirmed: '+
+          data.confirmed_species+
+          (missed?' · Original AI result: '+data.original_ai_classification:'');
+      }else if(data.classification==='no_bird'){
+        burstSummary.textContent='No bird detected. All six photos were analyzed.';
+      }else if(data.classification==='bird'){
+        burstSummary.textContent='🐦 Bird detected by AI · Species not manually confirmed.';
+      }else{
+        burstSummary.textContent='Classification: '+data.classification;
       }
       if(!lightbox.hidden)document.getElementById('photoMetadata').textContent=photoDescription(photos[selected]);
     }catch(err){message.textContent='Error: '+err.message}

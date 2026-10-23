@@ -206,6 +206,7 @@ def initialize_step4():
             "ai_species_score": "REAL",
             "confirmed_species": "TEXT",
             "species_status": "TEXT DEFAULT 'unreviewed'",
+            "original_ai_classification": "TEXT",
         }
         columns = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
         for name, definition in new_columns.items():
@@ -347,14 +348,14 @@ def add_species(name):
 
 
 def set_confirmed_species(folder, species):
-    """Set or clear a human-verified species for a bird-positive burst only."""
+    """Confirm a species, preserving the AI classification for reversibility."""
     if species is not None:
         if not isinstance(species, str):
             raise ValueError('Species must be text')
         if any(ord(c) < 32 or ord(c) == 127 for c in species):
             raise ValueError('Species contains invalid control characters')
         species = ' '.join(species.strip().split())
-        if not 1 <= len(species) <= 100 or any(ord(c) < 32 for c in species):
+        if not 1 <= len(species) <= 100:
             raise ValueError('Species name must be 1–100 printable characters')
 
         recognized = {
@@ -364,14 +365,50 @@ def set_confirmed_species(folder, species):
         if species.casefold() not in recognized:
             raise ValueError('Select a recognized species or add it to the catalog first')
         species = recognized[species.casefold()]
+
     with connect() as conn:
-        row = conn.execute('SELECT id, classification FROM events WHERE folder=? ORDER BY id DESC LIMIT 1',
-                           (str(folder),)).fetchone()
-        if not row or row[1] != 'bird':
-            raise ValueError('Bird-positive event not found')
-        conn.execute('UPDATE events SET confirmed_species=?, species_status=? WHERE id=?',
-                     (species, 'confirmed' if species else 'unreviewed', row[0]))
-    return {'confirmed_species': species, 'species_status': 'confirmed' if species else 'unreviewed'}
+        # Serialize manual confirmation with automatic cleanup.
+        # Acquire the write lock before reading the event's state.
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """SELECT id, classification, original_ai_classification,
+                      confirmed_species, COALESCE(deleted, 0)
+               FROM events WHERE folder=?
+               ORDER BY id DESC LIMIT 1""",
+            (str(folder),)
+        ).fetchone()
+
+        if not row:
+            raise ValueError('Capture not found')
+        event_id, classification, original, previous_species, deleted = row
+
+        if deleted:
+            raise ValueError('Capture photographs have already been deleted')
+
+        if species is not None:
+            if not previous_species:
+                original = classification
+            effective = 'bird'
+            status = 'confirmed'
+        else:
+            effective = original if original is not None else classification
+            original = None
+            status = 'unreviewed'
+
+        conn.execute(
+            """UPDATE events
+               SET classification=?, original_ai_classification=?,
+                   confirmed_species=?, species_status=?
+               WHERE id=?""",
+            (effective, original, species, status, event_id)
+        )
+
+    return {
+        'confirmed_species': species,
+        'species_status': status,
+        'classification': effective,
+        'original_ai_classification': original
+    }
 
 
 def ai_common_name(scientific_name):
@@ -390,7 +427,8 @@ def get_event_details(folder):
         event = conn.execute("""
             SELECT id, classification, first_bird_photo, bird_labels_json,
                    detection_engine, ai_species, ai_species_score,
-                   confirmed_species, species_status
+                   confirmed_species, species_status,
+                   original_ai_classification
             FROM events WHERE folder=? ORDER BY id DESC LIMIT 1
         """, (str(folder),)).fetchone()
         if event is None:
@@ -470,6 +508,7 @@ def get_event_details(folder):
         'ai_species_score': event['ai_species_score'],
         'confirmed_species': event['confirmed_species'],
         'species_status': event['species_status'],
+        'original_ai_classification': event['original_ai_classification'],
         'first_bird_photo': first,
         'bird_labels': normalize_labels(labels),
         'photos': photo_data

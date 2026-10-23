@@ -130,13 +130,18 @@ class SpeciesCatalogTests(unittest.TestCase):
         self.assertIsNone(result["confirmed_species"])
         self.assertEqual(result["species_status"], "unreviewed")
 
-    def test_nonbird_confirmation_rejected(self):
+    def test_nonbird_confirmation_allowed(self):
         catcam_stats.add_species("Purple finch")
 
-        with self.assertRaises(ValueError):
-            catcam_stats.set_confirmed_species(
-                self.nonbird_folder, "Purple finch"
-            )
+        result = catcam_stats.set_confirmed_species(
+            self.nonbird_folder, "Purple finch"
+        )
+
+        self.assertEqual(result["classification"], "bird")
+        self.assertEqual(result["confirmed_species"], "Purple finch")
+        self.assertEqual(
+            result["original_ai_classification"], "no_bird"
+        )
 
     def test_invalid_species_names(self):
         for name in ("", " ", "A" * 101, 'Bird\nName', None):
@@ -147,3 +152,57 @@ class SpeciesCatalogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ManualClassificationOverrideTests(unittest.TestCase):
+    setUp = SpeciesCatalogTests.setUp
+
+    def test_nonbird_override_and_restore(self):
+        result = catcam_stats.set_confirmed_species(
+            self.nonbird_folder, "Northern cardinal"
+        )
+        self.assertEqual(result["classification"], "bird")
+        self.assertEqual(result["original_ai_classification"], "no_bird")
+
+        with catcam_stats.connect() as conn:
+            row = conn.execute(
+                """SELECT classification, original_ai_classification,
+                          confirmed_species
+                   FROM events WHERE folder=?""",
+                (self.nonbird_folder,)
+            ).fetchone()
+        self.assertEqual(
+            row, ("bird", "no_bird", "Northern cardinal")
+        )
+
+        result = catcam_stats.set_confirmed_species(
+            self.nonbird_folder, None
+        )
+        self.assertEqual(result["classification"], "no_bird")
+
+    def test_deleted_event_cannot_be_confirmed(self):
+        with catcam_stats.connect() as conn:
+            conn.execute(
+                "UPDATE events SET deleted=1 WHERE folder=?",
+                (self.nonbird_folder,)
+            )
+        with self.assertRaises(ValueError):
+            catcam_stats.set_confirmed_species(
+                self.nonbird_folder, "Northern cardinal"
+            )
+
+    def test_manual_bird_not_cleanup_eligible(self):
+        catcam_stats.set_confirmed_species(
+            self.nonbird_folder, "Northern cardinal"
+        )
+        with catcam_stats.connect() as conn:
+            eligible = conn.execute(
+                """SELECT folder FROM events
+                   WHERE classification='no_bird'
+                     AND confirmed_species IS NULL
+                     AND COALESCE(deleted, 0)=0"""
+            ).fetchall()
+
+        self.assertNotIn(
+            self.nonbird_folder,
+            [row[0] for row in eligible]
+        )

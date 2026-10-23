@@ -27,6 +27,7 @@ def eligible_events(now=None):
             SELECT e.id, e.timestamp, e.folder
             FROM events e
             WHERE e.classification = 'no_bird'
+              AND e.confirmed_species IS NULL
               AND COALESCE(e.deleted, 0) = 0
               AND e.photo_count = 6
               AND COALESCE(e.bird_photo_count, 0) = 0
@@ -81,26 +82,63 @@ def cleanup_once(dry_run=False):
             print(f'ELIGIBLE event {event_id} ({timestamp}): {folder} [6 photos]')
             continue
         try:
-            # The database remains authoritative; do not erase photo classification rows.
-            for photo in paths:
-                photo.unlink()
-            Path(folder).rmdir()
+            # Serialize deletion with manual species confirmation.
             with catcam_stats.connect() as conn:
-                conn.execute('''
-                    UPDATE events SET deleted=1, deleted_at=?
-                    WHERE id=? AND classification='no_bird' AND deleted=0
-                ''', (datetime.now(timezone.utc).isoformat(), event_id))
-            # Once originals and DB status are handled, remove their cached
-            # previews too. Cache failures do not undo successful photo cleanup.
+                conn.execute("BEGIN IMMEDIATE")
+
+                # Recheck eligibility under the write lock.
+                eligible = conn.execute("""
+                    SELECT 1 FROM events
+                    WHERE id=?
+                      AND classification='no_bird'
+                      AND confirmed_species IS NULL
+                      AND COALESCE(deleted, 0)=0
+                      AND photo_count=6
+                      AND COALESCE(bird_photo_count, 0)=0
+                """, (event_id,)).fetchone()
+
+                if not eligible:
+                    continue
+
+                # Revalidate files while holding the lock.
+                paths = validated_photos(event_id, folder)
+                if paths is None:
+                    continue
+
+                for photo in paths:
+                    photo.unlink()
+
+                Path(folder).rmdir()
+
+                conn.execute("""
+                    UPDATE events
+                    SET deleted=1, deleted_at=?
+                    WHERE id=?
+                """, (
+                    datetime.now(timezone.utc).isoformat(),
+                    event_id
+                ))
+
+            # Remove cached thumbnails after the database transaction.
             try:
                 thumb_count = catcam_thumbnails.delete_event_thumbnails(folder)
             except (OSError, ValueError):
                 logging.exception('Thumbnail cleanup failed for event %s', event_id)
                 thumb_count = 0
+
             removed += 1
-            print(f'Deleted six non-bird photos and {thumb_count} thumbnails for event {event_id}', flush=True)
+            print(
+                f'Deleted six non-bird photos and {thumb_count} thumbnails '
+                f'for event {event_id}',
+                flush=True
+            )
+
         except OSError:
-            logging.exception('Cleanup failed for event %s; will not delete other files', event_id)
+            logging.exception(
+                'Cleanup failed for event %s; will not delete other files',
+                event_id
+            )
+
     return removed
 
 
