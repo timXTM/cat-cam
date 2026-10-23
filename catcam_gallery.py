@@ -8,7 +8,9 @@ import catcam_stats
 import catcam_advanced
 
 BASE_DIR = Path('/home/pi/wildlife')
-TZ = ZoneInfo('America/New_York')
+# Historical capture folders always use Eastern time.
+# This is independent of the user-selected display timezone.
+CAPTURE_TZ = ZoneInfo('America/New_York')
 
 
 def gallery(mode='all', bird_type='', start='', end='', start_hour='', end_hour='', order='newest', page=1, page_size=20):
@@ -54,7 +56,7 @@ def gallery(mode='all', bird_type='', start='', end='', start_hour='', end_hour=
                 if not burst.is_dir():
                     continue
                 try:
-                    original = datetime.strptime(date_dir.name + '/' + burst.name, '%Y-%m-%d/%H-%M-%S').replace(tzinfo=TZ)
+                    original = datetime.strptime(date_dir.name + '/' + burst.name, '%Y-%m-%d/%H-%M-%S').replace(tzinfo=CAPTURE_TZ)
                     local = original.astimezone(display_tz)
                 except ValueError:
                     continue

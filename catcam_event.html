@@ -18,6 +18,53 @@
  .mode,.dark-switch{order:1;margin-left:auto}
 }
 
+
+/* Full-resolution photo zoom and pan */
+.lightbox .photo-viewport {
+  position: relative;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  cursor: zoom-in;
+}
+
+.lightbox .photo-viewport.zoomed {
+  cursor: grab;
+}
+
+.lightbox .photo-viewport.dragging {
+  cursor: grabbing;
+}
+
+.lightbox .photo-viewport img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  transform-origin: center center;
+  user-select: none;
+  -webkit-user-drag: none;
+  will-change: transform;
+}
+
+.lightbox .metadata,
+.lightbox .foot {
+  flex-shrink: 0;
+}
+
+.lightbox .prev,
+.lightbox .next,
+.lightbox .close {
+  z-index: 2;
+}
+
 </style><link rel="stylesheet" href="/catcam_header.css">
 </head><body><div class="shell">
 <header id="catcam-header" class="catcam-shared-header"></header>
@@ -49,7 +96,7 @@
 <div class="photo-grid" id="photoGrid"></div>
 <div class="actions"><a class="action primary" href="/gallery">← Back to gallery</a><a class="action" href="/?tab=dashboard">Dashboard</a><a class="action" href="/?tab=settings">Settings</a></div>
 </div>
-<div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Photo viewer"><button class="close" id="close" aria-label="Close photo">✕ Close</button><button class="prev" id="prev" aria-label="Previous photo">‹</button><img id="largePhoto" alt="Enlarged capture"><button class="next" id="next" aria-label="Next photo">›</button><div class="metadata" id="photoMetadata" role="status"></div><div class="foot"><span id="photoPosition"></span><a id="originalLink" target="_blank" rel="noopener">Open original ↗</a></div></div>
+<div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Photo viewer"><button class="close" id="close" aria-label="Close photo">✕ Close</button><button class="prev" id="prev" aria-label="Previous photo">‹</button><div class="photo-viewport" id="photoViewport"><img id="largePhoto" alt="Enlarged capture" draggable="false"></div><button class="next" id="next" aria-label="Next photo">›</button><div class="metadata" id="photoMetadata" role="status"></div><div class="foot"><span id="photoPosition"></span><a id="originalLink" target="_blank" rel="noopener">Open original ↗</a></div></div>
 <script>
 const EVENT_DATA=__CATCAM_EVENT_DATA__;
 const {date,event,photos}=EVENT_DATA;
@@ -79,11 +126,176 @@ if(detection.classification==='bird'){
 }
 document.getElementById('crumbDate').textContent=date;
 document.getElementById('title').textContent=date+' · '+event.replaceAll('-',':');
+
+async function loadDisplayTimezone(){
+  try{
+    const response=await fetch('/api/advanced-settings',{cache:'no-store'});
+    if(!response.ok)throw Error('Settings unavailable');
+    const data=await response.json();
+    const timezone=data.settings?.timezone||'America/New_York';
+    if(EVENT_DATA.captured_at){
+      const formatted=new Intl.DateTimeFormat('en-US',{
+        timeZone:timezone,dateStyle:'medium',timeStyle:'short'
+      }).format(new Date(EVENT_DATA.captured_at));
+      document.getElementById('title').textContent=formatted;
+      document.getElementById('crumbDate').textContent=formatted;
+    }
+  }catch(error){
+    console.warn('Using original capture folder time:',error);
+  }
+}
+loadDisplayTimezone();
 document.getElementById('photoCount').textContent=photos.length+' photos';
 const grid=document.getElementById('photoGrid');
 const lightbox=document.getElementById('lightbox');
 const largePhoto=document.getElementById('largePhoto');
 let selected=0;
+
+const photoViewport=document.getElementById('photoViewport');
+
+let zoom=1;
+let panX=0;
+let panY=0;
+let dragPointer=null;
+let dragStartX=0;
+let dragStartY=0;
+let dragOriginX=0;
+let dragOriginY=0;
+let dragged=false;
+let suppressClick=false;
+
+function panLimits(){
+  const viewport=photoViewport.getBoundingClientRect();
+
+  // offsetWidth/offsetHeight are unaffected by CSS transforms.
+  // This keeps the pan limits stable while the photo is moving.
+  const imageWidth=largePhoto.offsetWidth;
+  const imageHeight=largePhoto.offsetHeight;
+
+  return {
+    x:Math.max(0,(imageWidth*zoom-viewport.width)/2),
+    y:Math.max(0,(imageHeight*zoom-viewport.height)/2)
+  };
+}
+
+function applyPhotoTransform(){
+  const limits=panLimits();
+  panX=Math.max(-limits.x,Math.min(limits.x,panX));
+  panY=Math.max(-limits.y,Math.min(limits.y,panY));
+
+  largePhoto.style.transform=
+    `translate(${panX}px,${panY}px) scale(${zoom})`;
+
+  photoViewport.classList.toggle('zoomed',zoom>1);
+}
+
+function resetPhotoZoom(){
+  if(dragPointer!==null){
+    try{photoViewport.releasePointerCapture(dragPointer)}catch(error){}
+  }
+
+  zoom=1;
+  panX=0;
+  panY=0;
+  dragPointer=null;
+  dragged=false;
+  suppressClick=false;
+
+  photoViewport.classList.remove('zoomed','dragging');
+  largePhoto.style.transform='';
+}
+
+function togglePhotoZoom(){
+  if(zoom>1){
+    resetPhotoZoom();
+    return;
+  }
+
+  zoom=2;
+  panX=0;
+  panY=0;
+  applyPhotoTransform();
+}
+
+photoViewport.addEventListener('pointerdown',event=>{
+  if(zoom<=1||event.button!==0)return;
+
+  dragPointer=event.pointerId;
+  dragStartX=event.clientX;
+  dragStartY=event.clientY;
+  dragOriginX=panX;
+  dragOriginY=panY;
+  dragged=false;
+
+  photoViewport.setPointerCapture(event.pointerId);
+});
+
+photoViewport.addEventListener('pointermove',event=>{
+  if(dragPointer!==event.pointerId)return;
+
+  const dx=event.clientX-dragStartX;
+  const dy=event.clientY-dragStartY;
+
+  if(Math.hypot(dx,dy)>5){
+    dragged=true;
+    photoViewport.classList.add('dragging');
+  }
+
+  if(!dragged)return;
+
+  panX=dragOriginX+dx;
+  panY=dragOriginY+dy;
+  applyPhotoTransform();
+});
+
+function endPhotoDrag(event){
+  if(dragPointer!==event.pointerId)return;
+
+  if(dragged)suppressClick=true;
+
+  dragPointer=null;
+  dragged=false;
+  photoViewport.classList.remove('dragging');
+
+  if(photoViewport.hasPointerCapture(event.pointerId)){
+    photoViewport.releasePointerCapture(event.pointerId);
+  }
+}
+
+photoViewport.addEventListener('pointerup',endPhotoDrag);
+photoViewport.addEventListener('pointercancel',endPhotoDrag);
+
+photoViewport.addEventListener('click',()=>{
+  if(suppressClick){
+    suppressClick=false;
+    return;
+  }
+  togglePhotoZoom();
+});
+
+photoViewport.addEventListener('wheel',event=>{
+  if(zoom<=1)return;
+
+  event.preventDefault();
+
+  const movement=event.deltaMode===1?16:
+    event.deltaMode===2?photoViewport.clientHeight:1;
+
+  if(event.shiftKey){
+    panX-=event.deltaY*movement;
+    panX-=event.deltaX*movement;
+  }else{
+    panY-=event.deltaY*movement;
+    panX-=event.deltaX*movement;
+  }
+
+  applyPhotoTransform();
+},{passive:false});
+
+window.addEventListener('resize',()=>{
+  if(!lightbox.hidden&&zoom>1)applyPhotoTransform();
+});
+
 function photoDescription(photo){
   const result=detection.photos?.[photo.url.split('/').pop()];
   const engine=detection.detection_engine==='local_ai'?'Local AI':'Google Vision';
@@ -99,8 +311,8 @@ function photoDescription(photo){
   else{parts.push('Not analyzed');}
   return parts.join(' · ');
 }
-function showPhoto(index){selected=(index+photos.length)%photos.length;largePhoto.src=photos[selected].url;largePhoto.alt='Capture photo '+(selected+1);document.getElementById('photoPosition').textContent='Photo '+(selected+1)+' of '+photos.length;document.getElementById('originalLink').href=photos[selected].url;document.getElementById('photoMetadata').textContent=photoDescription(photos[selected]);lightbox.hidden=false;document.body.style.overflow='hidden';document.getElementById('close').focus()}
-function closePhoto(){lightbox.hidden=true;document.body.style.overflow='';largePhoto.removeAttribute('src')}
+function showPhoto(index){resetPhotoZoom();selected=(index+photos.length)%photos.length;largePhoto.src=photos[selected].url;largePhoto.alt='Capture photo '+(selected+1);document.getElementById('photoPosition').textContent='Photo '+(selected+1)+' of '+photos.length;document.getElementById('originalLink').href=photos[selected].url;document.getElementById('photoMetadata').textContent=photoDescription(photos[selected]);lightbox.hidden=false;document.body.style.overflow='hidden';document.getElementById('close').focus()}
+function closePhoto(){resetPhotoZoom();lightbox.hidden=true;document.body.style.overflow='';largePhoto.removeAttribute('src')}
 photos.forEach((photo,index)=>{const button=document.createElement('button');button.className='photo-card';button.type='button';button.setAttribute('aria-label','View photo '+(index+1));const img=document.createElement('img');img.src=photo.thumb;img.alt='Capture photo '+(index+1);img.loading='lazy';const caption=document.createElement('div');caption.className='photo-caption';const name=document.createElement('span');name.textContent='Photo '+(index+1);const hint=document.createElement('small');hint.textContent='Enlarge ↗';caption.append(name,hint);button.append(img,caption);
   const result=detection.photos?.[photo.url.split('/').pop()];
   const detail=document.createElement('div');detail.className='photo-detection';

@@ -219,6 +219,16 @@ async function saveSettings(reset=false){
 document.getElementById("save").addEventListener("click",()=>saveSettings(false));
 document.getElementById("reset").addEventListener("click",()=>saveSettings(true));
 
+let displayTimezone='America/New_York';
+
+function formatDisplayTime(iso, options){
+  const value=new Date(iso);
+  if(Number.isNaN(value.getTime()))return iso||'Unknown time';
+  return new Intl.DateTimeFormat('en-US',{
+    timeZone:displayTimezone,...options
+  }).format(value);
+}
+
 let recentEvents=[];
 let galleryFilter="all";
 function eventKey(e){return `${e.date}/${e.event}`;}
@@ -228,13 +238,52 @@ function makeCaptureCard(e){
   a.href=`/event?date=${encodeURIComponent(e.date)}&event=${encodeURIComponent(e.event)}`;
   const img=document.createElement("img");img.loading="lazy";img.src=e.preview;img.alt="Captured wildlife";
   const info=document.createElement("div");info.className="capture-info";
-  const time=document.createElement("strong");time.textContent=`${e.date}  ${e.event.replaceAll("-",":")}`;
+  const time=document.createElement("strong");time.textContent=e.captured_at
+    ?formatDisplayTime(e.captured_at,{dateStyle:'medium',timeStyle:'short'})
+    :`${e.date}  ${e.event.replaceAll("-",":")}`;
   const note=document.createElement("span");note.textContent=`${e.count} photos · Open burst →`;
   info.append(time,note);
   const det=e.detection||{};
   if(det.classification==='bird'){
     const bird=document.createElement('span');
-    bird.textContent=`🐦 Bird detected in photo ${det.first_bird_photo || '?'}${det.bird_labels?.length?' · Google Vision: '+(det.bird_labels||[]).map(v=>typeof v==='string'?v:(v&&typeof v==='object'?(v.name||v.description||''):'')).filter(Boolean).join(', '):''}`;
+    const engine=det.detection_engine;
+    const photo=det.first_bird_photo || '?';
+    const labels=(Array.isArray(det.bird_labels)?det.bird_labels:[])
+      .map(v=>typeof v==='string'?v:(v&&typeof v==='object'?(v.name||v.description||''):''))
+      .filter(Boolean);
+
+    let description=`🐦 Bird detected in photo ${photo}`;
+
+    if(engine==='local_ai'){
+      const common=det.ai_common_name;
+      const scientific=det.ai_species;
+      const species=common&&scientific&&common.toLowerCase()!==scientific.toLowerCase()
+        ?`${common} (${scientific})`
+        :(common||scientific||'');
+
+      if(det.confirmed_species){
+        description+=` · Confirmed: ${det.confirmed_species}`;
+      }else if(species){
+        description+=` · AIY estimate: ${species}`;
+
+        if(det.ai_species_score!=null){
+          const confidence=100*Number(det.ai_species_score);
+          if(Number.isFinite(confidence)){
+            description+=` · ${confidence.toFixed(1)}% confidence`;
+          }
+        }
+      }else{
+        description+=' · Local AI';
+      }
+    }else if(engine==='google_vision'){
+      description+=labels.length
+        ?` · Google Vision: ${labels.join(', ')}`
+        :' · Google Vision';
+    }else{
+      description+=' · Detection source unknown';
+    }
+
+    bird.textContent=description;
     info.append(bird);
   }else if(det.classification==='no_bird'){
     const noBird=document.createElement('span');noBird.textContent='No bird detected';info.append(noBird);
@@ -310,7 +359,7 @@ async function loadStatistics(){
     for(const e of data.recent){
       const tr=document.createElement("tr");
       const dt=new Date(e.timestamp);
-      cell(tr,Number.isNaN(dt.getTime())?e.timestamp:dt.toLocaleString());
+      cell(tr,Number.isNaN(dt.getTime())?e.timestamp:formatDisplayTime(e.timestamp,{dateStyle:'medium',timeStyle:'short'}));
       cell(tr,e.trigger_source);
       cell(tr,e.classification.replaceAll("_"," "));
       cell(tr,`${e.bird_photo_count} / ${e.photo_count}`);
@@ -318,7 +367,7 @@ async function loadStatistics(){
       activityRows.appendChild(tr);
     }
     renderEvents();
-    statsUpdated.textContent="Updated "+new Date().toLocaleTimeString();
+    statsUpdated.textContent="Updated "+formatDisplayTime(new Date().toISOString(),{timeStyle:'short'});
   }catch(error){statsUpdated.textContent="Could not load statistics";}
 }
 
@@ -386,6 +435,8 @@ async function loadAdvanced(){
     const r=await fetch('/api/advanced-settings',{cache:'no-store'});
     const data=await r.json();
     if(!r.ok)throw new Error(data.message||'Unable to load settings');
+    displayTimezone=data.settings.timezone||'America/New_York';
+    renderEvents();
     for(const el of advancedInputs){const v=data.settings[el.dataset.advanced];if(el.type==='checkbox')el.checked=!!v;else el.value=v;}
     showOrientation(data.settings);
     updateVisionUsageVisibility();
@@ -406,6 +457,9 @@ async function saveAdvanced(reset=false){
     const r=await fetch('/api/advanced-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(reset?{reset:true}:{settings})});
     const data=await r.json();
     if(!r.ok)throw new Error(data.message||'Save failed');
+    displayTimezone=data.settings.timezone||'America/New_York';
+    renderEvents();
+    loadStatistics();
     for(const el of advancedInputs){const v=data.settings[el.dataset.advanced];if(el.type==='checkbox')el.checked=!!v;else el.value=v;}
     showOrientation(data.settings);
     updateVisionUsageVisibility();

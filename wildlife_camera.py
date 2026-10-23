@@ -18,6 +18,7 @@ import json
 from urllib.parse import urlparse, unquote, parse_qs
 from pathlib import Path
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from PIL import Image
 
@@ -584,6 +585,7 @@ class CatCamHandler(BaseHTTPRequestHandler):
                             events.append({
                                 "date":date_dir.name,
                                 "event":event_dir.name,
+                                "captured_at":capture_display_timestamp(date_dir.name, event_dir.name),
                                 "count":len(photos),
                                 "preview":f"/thumb/{date_dir.name}/{event_dir.name}/{photos[0].name}",
                                 "detection":catcam_stats.get_event_details(event_dir)
@@ -618,6 +620,7 @@ class CatCamHandler(BaseHTTPRequestHandler):
             event_data = {
                 "date": date_name,
                 "event": event_name,
+                "captured_at": capture_display_timestamp(date_name, event_name),
                 "detection": catcam_stats.get_event_details(event_dir),
                 "photos": [
                     {"url": f"/photo/{date_name}/{event_name}/{p.name}",
@@ -1298,6 +1301,20 @@ def recover_interrupted_classifications():
         """)
 
 
+
+def capture_display_timestamp(date_name, event_name):
+    """Interpret existing capture folder names in their original Eastern timezone."""
+    try:
+        captured = datetime.strptime(
+            f"{date_name}/{event_name}", "%Y-%m-%d/%H-%M-%S"
+        )
+        return captured.replace(
+            tzinfo=ZoneInfo("America/New_York")
+        ).isoformat()
+    except ValueError:
+        return None
+
+
 def start_bird_detection_worker():
     recover_interrupted_classifications()
 
@@ -1318,7 +1335,7 @@ def run_capture_event(changed_percent, trigger_source):
         camera_busy = True
 
     try:
-        event_timestamp=datetime.now()
+        event_timestamp=datetime.now(ZoneInfo('America/New_York'))
         event_dir=BASE_DIR/event_timestamp.strftime("%Y-%m-%d")/event_timestamp.strftime("%H-%M-%S")
         event_dir.mkdir(parents=True,exist_ok=True)
 
