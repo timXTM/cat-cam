@@ -37,6 +37,7 @@
 .setting-help a{font-weight:650;text-decoration:underline;text-underline-offset:2px}
 .setting-help a:focus-visible{outline:2px solid var(--green)}
 </style><link rel="stylesheet" href="/catcam_header.css">
+<script src="/catcam_species_names.js"></script>
 </head><body data-orientation="portrait"><div class="shell">
 <header id="catcam-header" class="catcam-shared-header"></header>
 <script src="/catcam_header.js"></script>
@@ -262,7 +263,7 @@ function makeCaptureCard(e){
         :(common||scientific||'');
 
       if(det.confirmed_species){
-        description+=` · Confirmed: ${det.confirmed_species}`;
+        description+=` · Confirmed: ${formatCatcamSpecies(det.confirmed_species)}`;
       }else if(species){
         description+=` · AIY estimate: ${species}`;
 

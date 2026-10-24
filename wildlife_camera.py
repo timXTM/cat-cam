@@ -385,7 +385,11 @@ class CatCamHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
 
-        if path in ("/catcam_header.css", "/catcam_header.js"):
+        if path in (
+            "/catcam_header.css",
+            "/catcam_header.js",
+            "/catcam_species_names.js"
+        ):
             filename = path.lstrip("/")
             try:
                 content = (Path(__file__).resolve().parent / filename).read_text(encoding="utf-8")
@@ -491,7 +495,10 @@ class CatCamHandler(BaseHTTPRequestHandler):
             species = catcam_stats.get_species_options()
             self.send_body(
                 200,
-                json.dumps({'species': species}),
+                json.dumps({
+                    'species': species,
+                    'species_options': catcam_stats.get_species_display_options()
+                }),
                 "application/json; charset=utf-8"
             )
             return

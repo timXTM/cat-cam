@@ -18,6 +18,7 @@
 }
 
 </style><link rel="stylesheet" href="/catcam_header.css">
+<script src="/catcam_species_names.js"></script>
 </head><body><div class="shell">
 <header id="catcam-header" class="catcam-shared-header"></header>
 <script src="/catcam_header.js"></script>
@@ -70,7 +71,7 @@ function barChart(target,rows,opts={}){
  rows.forEach((r,i)=>{let x=left+i*step+(step-barW)/2,h=r.events/max*plotH,y=top+plotH-h;svg+=`<rect class="bar" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${barW.toFixed(2)}" height="${h.toFixed(2)}" rx="2"><title>${escapeHtml(r.label)}: ${r.events} event${r.events===1?'':'s'}</title></rect>`;if(i%labelEvery===0||i===n-1){let lx=left+(i+.5)*step;svg+=`<text x="${lx.toFixed(1)}" y="${height-23}" text-anchor="middle">${escapeHtml(r.shortLabel)}</text>`}});
  svg+='</svg>';$(target).innerHTML=svg;
 }
-function renderTypes(rows){if(!rows.length){empty('typeChart','No matching bird types.');return}let max=Math.max(...rows.map(x=>x.events));$('typeChart').innerHTML=rows.map(x=>`<div class="row"><a class="name" title="View all photos of ${escapeHtml(x.bird_type)}" href="/gallery?bird_type=${encodeURIComponent(x.bird_type)}">${escapeHtml(x.bird_type)} ↗</a><span class="track"><span class="fill" style="display:block;width:${(100*x.events/max).toFixed(2)}%"></span></span><span class="count">${x.events}</span></div>`).join('')}
+function renderTypes(rows){if(!rows.length){empty('typeChart','No matching bird types.');return}let max=Math.max(...rows.map(x=>x.events));$('typeChart').innerHTML=rows.map(x=>`<div class="row"><a class="name" title="View all photos of ${escapeHtml(x.bird_type)}" href="/gallery?bird_type=${encodeURIComponent(x.bird_type)}">${escapeHtml(formatCatcamSpecies(x.bird_type))} ↗</a><span class="track"><span class="fill" style="display:block;width:${(100*x.events/max).toFixed(2)}%"></span></span><span class="count">${x.events}</span></div>`).join('')}
 function renderEvents(events){
  $('eventCount').textContent=`(${events.length})`;
 
@@ -81,8 +82,8 @@ function renderEvents(events){
  }
 
  $('events').innerHTML=[...events].reverse().map(e=>{
-   const estimate=e.estimated_species||'—';
-   const confirmed=e.confirmed_species_display||'—';
+   const estimate=formatCatcamSpecies(e.estimated_species)||'—';
+   const confirmed=formatCatcamSpecies(e.confirmed_species_display)||'—';
    const status=e.identification_status||'unidentified';
 
    const statusLabels={
@@ -100,7 +101,7 @@ function renderEvents(events){
      <td>${escapeHtml(formatStamp(e.timestamp_local))}</td>
      <td><a href="/gallery?bird_type=${encodeURIComponent(e.bird_type)}"
        title="View photos of this bird type">
-       ${escapeHtml(e.bird_type)} ↗</a></td>
+       ${escapeHtml(formatCatcamSpecies(e.bird_type))} ↗</a></td>
      <td>${escapeHtml(estimate)}</td>
      <td>${escapeHtml(confirmed)}</td>
      <td>${escapeHtml(statusLabels[status]||status)}</td>
@@ -118,7 +119,7 @@ function render(data){
  $('total').textContent=data.total_events.toLocaleString();$('types').textContent=data.by_bird_type.length;const peak=Math.max(...data.by_hour.map(x=>x.events));$('peak').textContent=peak?hourName(data.by_hour.find(x=>x.events===peak).hour):'—';
  const day=data.by_day||[];if(day.length){const dates=[];let current=day[0].date,last=day[day.length-1].date;const map=new Map(day.map(x=>[x.date,x.events]));for(let i=0;i<3700&&current<=last;i++,current=shiftDay(current,1))dates.push({label:current,shortLabel:current.slice(5),events:map.get(current)||0});barChart('dayChart',dates,{title:'Events by day',width:Math.max(560,dates.length*17),maxLabels:11})}else empty('dayChart','No matching activity for these filters.');
  barChart('hourChart',data.by_hour.map(x=>({label:hourName(x.hour),shortLabel:x.hour%3===0?hourName(x.hour):'',events:x.events})),{title:'Events by hour',width:640,maxLabels:24});renderTypes(data.by_bird_type);renderEvents(data.events)}
-function fillTypes(types){state.types=types;const selected=$('birdType').value;$('birdType').innerHTML='<option value="">All bird types</option>';for(const name of types)$('birdType').add(new Option(name,name));if(types.includes(selected))$('birdType').value=selected}
+function fillTypes(types){state.types=types;const selected=$('birdType').value;$('birdType').innerHTML='<option value="">All bird types</option>';for(const name of types)$('birdType').add(new Option(formatCatcamSpecies(name),name));if(types.includes(selected))$('birdType').value=selected}
 async function load(){const s=$('status');s.classList.remove('error');s.textContent='Loading…';$('apply').disabled=true;try{const q=new URLSearchParams();for(const [key,id] of [['start','start'],['end','end'],['start_hour','hourStart'],['end_hour','hourEnd'],['bird_type','birdType'],['identification_status','identificationStatus']]){const v=$(id).value;if(v!=='')q.set(key,v)}if((!!$('hourStart').value)!=(!!$('hourEnd').value))throw new Error('Choose both start and end hours, or leave both as All hours.');if($('start').value&&$('end').value&&$('start').value>$('end').value)throw new Error('End date must be on or after start date.');const res=await fetch('/api/bird-activity?'+q.toString(),{cache:'no-store'});const data=await res.json();if(!res.ok)throw new Error(data.error||`API returned ${res.status}`);if(!state.types.length)fillTypes(data.available_bird_types||[]);state.timezone=data.timezone||'America/New_York';$('displayTimezone').textContent=state.timezone;render(data);s.textContent=`Updated ${new Intl.DateTimeFormat('en-US',{timeZone:state.timezone,hour:'numeric',minute:'2-digit'}).format(new Date())} (${state.timezone})`;}catch(e){s.textContent=e.message||String(e);s.classList.add('error');console.error(e)}finally{$('apply').disabled=false}}
 $('apply').addEventListener('click',load);$('reset').addEventListener('click',()=>{$('period').value='all';periodChanged();$('hourStart').value='';$('hourEnd').value='';$('birdType').value='';$('identificationStatus').value='';load()});load();
 </script></body></html>
