@@ -306,6 +306,20 @@ def get_species_options():
     return sorted(species.values(), key=str.casefold)
 
 
+
+def get_species_display_options():
+    """Return species identifiers and formatted labels for dropdowns."""
+    from catcam_species_names import format_species_name
+
+    return [
+        {
+            "value": name,
+            "label": format_species_name(name)
+        }
+        for name in get_species_options()
+    ]
+
+
 def add_species(name):
     """Add a species to the persistent manual-confirmation catalog."""
     if not isinstance(name, str):
