@@ -194,6 +194,7 @@ DISCORD_TIMEOUT = 20
 
 WEB_PORT = 8080
 WEB_FRAME_INTERVAL = 0.5  # 2 fps maximum
+HELP_URL = "https://timxtm.github.io/cat-cam/"
 
 latest_web_frame = None
 latest_web_frame_lock = threading.Lock()
@@ -439,6 +440,13 @@ class CatCamHandler(BaseHTTPRequestHandler):
                 return
             mime = "text/css; charset=utf-8" if filename.endswith(".css") else "text/javascript; charset=utf-8"
             self.send_body(200, content, mime)
+            return
+
+        if path in ("/help", "/help/"):
+            self.send_response(302)
+            self.send_header("Location", HELP_URL)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
             return
 
         if path in ("/", "/index.html"):

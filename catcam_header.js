@@ -24,6 +24,7 @@
     if((onGallery&&key==='gallery')||(onActivity&&key==='activity')){el.classList.add('active');el.setAttribute('aria-current','page');}
     nav.append(el);
   }
+  const help=document.createElement('a');help.textContent='Help';help.href='/help';help.target='_blank';help.rel='noopener';help.title='Open the CatCam user guide in a new tab';nav.append(help);
   const mode=document.createElement('label');mode.className='catcam-mode';mode.textContent='☾ Dark mode ';
   const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.id=darkId;mode.append(checkbox);
   root.append(brand,status,nav,mode);
