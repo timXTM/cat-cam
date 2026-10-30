@@ -188,9 +188,25 @@ async function loadStatus(){
   try{
     const r=await fetch("/api/status",{cache:"no-store"});
     const s=await r.json();
+    if(!s.camera_live){
+      const age=s.camera_age_seconds;
+      motionEl.textContent=Number.isFinite(age)
+        ? `Camera stalled — last frame ${Math.round(age)}s ago`
+        : "Camera stalled — no frames yet";
+      motionEl.style.color="#ff6259";
+      return;
+    }
+    if(s.camera_busy){
+      motionEl.textContent="Camera busy — capturing burst…";
+      motionEl.style.color="";
+      return;
+    }
     motionEl.textContent=`Current ROI motion: ${s.current_motion.toFixed(2)}% / ${s.motion_threshold.toFixed(1)}%`;
     motionEl.style.color=s.current_motion>=s.motion_threshold?"#ff6259":"";
-  }catch(e){}
+  }catch(e){
+    motionEl.textContent="Camera status unavailable";
+    motionEl.style.color="#ff6259";
+  }
 }
 async function loadSettings(){
   const r=await fetch("/api/settings",{cache:"no-store"});

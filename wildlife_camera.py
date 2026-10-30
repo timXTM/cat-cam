@@ -197,8 +197,13 @@ WEB_FRAME_INTERVAL = 0.5  # 2 fps maximum
 
 latest_web_frame = None
 latest_web_frame_lock = threading.Lock()
+
 # Updated by the capture loop, independently of live-stream viewers.
-last_camera_frame_time = None
+# The watchdog uses this heartbeat to detect a stalled camera pipeline.
+last_camera_frame_time = time.monotonic()
+CAMERA_LIVE_TIMEOUT_SECONDS = 90
+WATCHDOG_TIMEOUT_SECONDS = 180
+WATCHDOG_CHECK_INTERVAL_SECONDS = 5
 
 active_web_viewers = 0
 active_web_viewers_lock = threading.Lock()
@@ -210,6 +215,42 @@ manual_trigger_lock = threading.Lock()
 camera_busy = False
 camera_busy_lock = threading.Lock()
 GALLERY_EVENT_LIMIT = 20
+
+
+def mark_camera_frame():
+    """Record that the camera produced a frame or a still capture."""
+    global last_camera_frame_time
+    last_camera_frame_time = time.monotonic()
+
+
+def camera_frame_age():
+    """Return seconds since the last camera frame, or None if never seen."""
+    frame_time = last_camera_frame_time
+    if frame_time is None:
+        return None
+    return time.monotonic() - frame_time
+
+
+def camera_watchdog_worker():
+    """Restart CatCam when the camera loop stops producing frames.
+
+    The main thread can block indefinitely inside libcamera's
+    capture_request() after a pipeline timeout. A daemon thread cannot
+    recover that thread, so exit the process and let systemd's
+    Restart=on-failure start CatCam again. os._exit() is used because
+    Python signal handlers and cleanup cannot run while the main thread
+    is blocked in C code.
+    """
+    while True:
+        time.sleep(WATCHDOG_CHECK_INTERVAL_SECONDS)
+        age = camera_frame_age()
+        if age is not None and age > WATCHDOG_TIMEOUT_SECONDS:
+            print(
+                f"WATCHDOG: no camera frame for {age:.0f}s; "
+                "exiting so systemd can restart CatCam",
+                flush=True
+            )
+            os._exit(1)
 
 
 def get_lan_ip():
@@ -468,14 +509,21 @@ class CatCamHandler(BaseHTTPRequestHandler):
                 motion = current_motion_percent
             with settings_lock:
                 threshold = MOTION_THRESHOLD
-            # This timestamp is updated after a successful camera capture.
-            # Allow for temporary pauses while recording photo bursts.
-            age = None if last_camera_frame_time is None else time.monotonic() - last_camera_frame_time
-            camera_live = age is not None and age < 90
+            with camera_busy_lock:
+                busy = camera_busy
+            # This timestamp is updated after every successful frame or
+            # still capture, including between photos in a burst.
+            age = camera_frame_age()
+            camera_live = age is not None and age < CAMERA_LIVE_TIMEOUT_SECONDS
             self.send_body(
                 200,
-                json.dumps({"current_motion": motion, "motion_threshold": threshold,
-                            "camera_live": camera_live}),
+                json.dumps({
+                    "current_motion": motion,
+                    "motion_threshold": threshold,
+                    "camera_live": camera_live,
+                    "camera_busy": busy,
+                    "camera_age_seconds": None if age is None else round(age, 1)
+                }),
                 "application/json; charset=utf-8"
             )
             return
@@ -992,6 +1040,14 @@ def send_discord_notification(
 # Camera setup
 # ============================================================
 
+# Start the watchdog before camera initialization so a hung driver or
+# capture request also triggers an automatic restart.
+threading.Thread(
+    target=camera_watchdog_worker,
+    daemon=True,
+    name="CatCamWatchdog"
+).start()
+
 picam2 = Picamera2()
 
 # v7 normal state: process only a 320x240 YUV stream.
@@ -1062,6 +1118,7 @@ def capture_full_resolution_burst(event_dir):
             filename = event_dir / f"{i:02d}.jpg"
             capture_start = time.monotonic()
             picam2.capture_file(str(filename))
+            mark_camera_frame()
 
             if first_photo_seconds is None:
                 first_photo_seconds = time.monotonic() - burst_start
@@ -1439,7 +1496,7 @@ try:
         try:
             frame = request.make_array("lores")
             gray = frame[:HEIGHT, :WIDTH].astype(np.int16)
-            last_camera_frame_time = time.monotonic()
+            mark_camera_frame()
 
             with active_web_viewers_lock:
                 viewers = active_web_viewers
@@ -1496,7 +1553,7 @@ try:
             try:
                 frame = request.make_array("lores")
                 gray = frame[:HEIGHT, :WIDTH].astype(np.int16)
-                last_camera_frame_time = time.monotonic()
+                mark_camera_frame()
 
                 with active_web_viewers_lock:
                     viewers = active_web_viewers

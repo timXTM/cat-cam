@@ -1,6 +1,6 @@
 # CatCam — Raspberry Pi Wildlife Camera
 
-**Documentation updated:** October 21, 2026 · **Code reviewed:** `timXTM/cat-cam`, commit `c549e5a`.
+**Documentation updated:** October 30, 2026 · **Code reviewed:** `timXTM/cat-cam`, `main`.
 
 CatCam is a self-hosted bird-feeder camera running on a Raspberry Pi Zero W. It watches a configurable region of interest (ROI), captures six high-resolution JPEGs per motion/manual trigger, classifies the burst, and serves a LAN dashboard, galleries, and bird-activity analytics. Optional Discord delivery sends bird-positive bursts. The system can use Google Cloud Vision or an authenticated local detector on a separate Raspberry Pi 4.
 
@@ -9,6 +9,7 @@ CatCam is a self-hosted bird-feeder camera running on a Raspberry Pi Zero W. It 
 ## Features
 
 - Live MJPEG preview, camera-health status, manual trigger, configurable motion ROI and threshold, focus/autofocus, and mounting orientation.
+- Automatic camera-loop watchdog: if the camera pipeline stops producing frames, CatCam exits so systemd can restart it, and the dashboard reports a stalled camera instead of a stale motion value.
 - Six full-resolution photographs per burst, thumbnail cache, and date/time-organized archive.
 - Two detection engines: Google Cloud Vision and authenticated Pi 4 Local AI (YOLO bird detection with optional AIY Birds species identification).
 - Photo-by-photo detection records, including checked photographs, first bird-positive photograph, species estimates, and confidence scores.
@@ -122,6 +123,7 @@ Advanced settings cover motion enablement, pixel difference, sampling/cooldown/b
    - **Local AI:** calls the authenticated Pi 4 endpoint with the synchronized burst path and ROI. A bird result may include the detected photo, AIY species estimate, and confidence. Errors are **not** silently retried through Google Vision.
 4. Bird-positive bursts are preserved and optionally sent to Discord as all six originals. Non-bird bursts do not generate Discord bird notifications.
 5. A cleanup worker periodically deletes eligible fully classified non-bird bursts after the retention interval (default 24 hours; default check interval 15 minutes).
+6. A camera watchdog checks the last successful frame or still-capture timestamp. If the camera loop produces no frame for 180 seconds, CatCam exits with a failure so systemd's `Restart=on-failure` starts it again. This recovers from libcamera pipeline timeouts that would otherwise leave the process alive but the motion loop blocked forever. The dashboard uses `camera_live` and `camera_busy` from `GET /api/status` to show a stalled-camera message rather than a frozen ROI percentage.
 
 Incomplete or failed classification must not be treated as `no_bird`. Cleanup requires a `no_bird` event, six expected photos, six recorded negative photo detections, and strict path/content validation. To preview candidates without deleting anything:
 
@@ -189,7 +191,7 @@ Summary counters distinguish confirmed, estimated, and unidentified events. Coun
 | `/gallery` | Paginated historical Gallery |
 | `/event?date=YYYY-MM-DD&event=HH-MM-SS` | Burst detail and enlarged-photo viewer |
 | `/bird-activity` | Bird Activity charts |
-| `GET /api/status` | Camera health; `camera_live` true when a frame was captured within 90 seconds |
+| `GET /api/status` | Camera health; `camera_live` is true when a frame was captured within 90 seconds, `camera_busy` is true during a burst, and `camera_age_seconds` reports the age of the last frame |
 | `GET /api/statistics` | Event and API usage statistics |
 | `GET /api/gallery` | Gallery events, pagination, filters |
 | `GET /api/bird-activity` | Event-based bird analytics |
@@ -289,7 +291,7 @@ curl -sS --max-time 10 -H "X-CatCam-Token: $TOKEN" http://192.168.1.75:8765/heal
 unset TOKEN
 ```
 
-- **Camera offline/checking:** inspect `GET /api/status`, service logs, and camera initialization. The shared header uses recent camera frames, not an extra camera stream.
+- **Camera offline/checking:** inspect `GET /api/status`, service logs, and camera initialization. `camera_live: false` with an increasing `camera_age_seconds` means the camera loop has stalled; the dashboard shows a stalled-camera message instead of the last ROI value. The watchdog should exit the process after 180 seconds and systemd should restart it. The shared header uses recent camera frames, not an extra camera stream.
 - **Gallery missing photos:** non-bird originals may have been removed by retention; thumbnails do not substitute for originals.
 - **No Discord notification:** check event classification, advanced Discord toggle, `/home/pi/.catcam-discord`, environment webhook, and logs.
 - **Pi 4 detection failure:** verify service, matching tokens, synchronized files, network, and timeout; do not interpret failure as a negative detection.
