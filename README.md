@@ -12,6 +12,8 @@ A user-facing guide for non-developers is published at **<https://timxtm.github.
 
 The guide is built with MkDocs Material from [`docs/`](docs/) and deployed to GitHub Pages by [`.github/workflows/docs.yml`](.github/workflows/docs.yml). The CatCam header includes a **Help** link that opens `/help`, which redirects to the published guide. The guide is hosted separately so it remains available when the camera is offline.
 
+In the repository's **Settings → Pages**, set **Build and deployment → Source** to **GitHub Actions**. A branch-based source publishes the repository README instead of the MkDocs site. Pushes that change `docs/`, `mkdocs.yml`, `requirements-docs.txt`, or the docs workflow then rebuild and deploy the guide automatically; the workflow also supports a manual run.
+
 ```bash
 python3 -m venv .venv-docs
 .venv-docs/bin/pip install -r requirements-docs.txt

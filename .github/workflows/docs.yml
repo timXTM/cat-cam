@@ -1,5 +1,7 @@
 name: Publish user guide
 
+# Repository Settings → Pages → Build and deployment → Source must be GitHub Actions.
+
 on:
   push:
     branches: [main]
