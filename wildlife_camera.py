@@ -1047,6 +1047,10 @@ threading.Thread(
     daemon=True,
     name="CatCamWatchdog"
 ).start()
+print(
+    f"Camera watchdog active ({WATCHDOG_TIMEOUT_SECONDS}s frame timeout)",
+    flush=True
+)
 
 picam2 = Picamera2()
 
