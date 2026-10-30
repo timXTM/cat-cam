@@ -6,6 +6,24 @@ CatCam is a self-hosted bird-feeder camera running on a Raspberry Pi Zero W. It 
 
 > **Scope:** This repository contains the Pi Zero camera application, browser UI, and Pi 4 *client*. The Pi 4 AI server source code is included in [`pi-four/`](pi-four/). Large model weights, credentials, and the Syncthing deployment are not included. The addresses and paths below describe the current installation; they are not universal defaults.
 
+## User guide
+
+A user-facing guide for non-developers is published at **<https://timxtm.github.io/cat-cam/>**. It covers the dashboard, camera controls, every Settings option, the Gallery and burst detail view, Bird Activity, troubleshooting, and an FAQ, with screenshots captured from the running camera.
+
+The guide is built with MkDocs Material from [`docs/`](docs/) and deployed to GitHub Pages by [`.github/workflows/docs.yml`](.github/workflows/docs.yml). The CatCam header includes a **Help** link that opens `/help`, which redirects to the published guide. The guide is hosted separately so it remains available when the camera is offline.
+
+```bash
+python3 -m venv .venv-docs
+.venv-docs/bin/pip install -r requirements-docs.txt
+.venv-docs/bin/mkdocs serve
+```
+
+To refresh the screenshots, start the camera, tunnel its web port if needed, and run:
+
+```bash
+CATCAM_URL=http://127.0.0.1:18080 .venv-docs/bin/python scripts/capture_docs_screenshots.py
+```
+
 ## Features
 
 - Live MJPEG preview, camera-health status, manual trigger, configurable motion ROI and threshold, focus/autofocus, and mounting orientation.
@@ -17,6 +35,7 @@ CatCam is a self-hosted bird-feeder camera running on a Raspberry Pi Zero W. It 
 - Bird-positive bursts retained and optionally delivered to Discord with all six photographs.
 - Conservative cleanup of fully classified non-bird bursts after the configured retention period.
 - Dashboard, Settings, paginated Gallery, burst details, and Bird Activity analytics.
+- In-app **Help** link and `/help` redirect to the published MkDocs user guide, plus a screenshot refresh script for the docs.
 - Searchable species-confirmation dropdown with the ability to add new species.
 - Persistent SQLite species catalog with case-insensitive duplicate prevention.
 - Manual species confirmations stored separately from original AI estimates.
@@ -64,6 +83,10 @@ The case is part of the physical build; its printable design files are not inclu
 | `catcam_bird_activity.html` | Bird Activity charts and event listing |
 | `catcam_bird_gallery.html` | Legacy bird gallery template (current `/bird-gallery` route uses main Gallery) |
 | `catcam_header.css`, `catcam_header.js` | Shared navigation and camera-health header |
+| `docs/` | MkDocs user guide source and screenshots |
+| `mkdocs.yml`, `requirements-docs.txt` | User guide configuration and build dependencies |
+| `scripts/capture_docs_screenshots.py` | Playwright screenshot capture for the user guide |
+| `.github/workflows/docs.yml` | Builds and publishes the user guide to GitHub Pages |
 | `catcam.service` | Example systemd unit |
 | `update.sh` | Guarded Git update, restart, and rollback helper |
 | `requirements.txt` | Python dependency notes |
@@ -188,6 +211,7 @@ Summary counters distinguish confirmed, estimated, and unidentified events. Coun
 | --- | --- |
 | `/`, `/?tab=dashboard` | Dashboard, camera preview, controls |
 | `/?tab=settings` | Settings, detection engine, conditional Vision usage |
+| `/help`, `/help/` | Redirects to the published user guide on GitHub Pages |
 | `/gallery` | Paginated historical Gallery |
 | `/event?date=YYYY-MM-DD&event=HH-MM-SS` | Burst detail and enlarged-photo viewer |
 | `/bird-activity` | Bird Activity charts |

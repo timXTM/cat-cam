@@ -25,6 +25,12 @@ captures/
 *.jpeg
 *.png
 
+# Documentation screenshots are tracked
+!docs/images/*.png
+
+# MkDocs build output
+site/
+
 # Logs and temporary files
 *.log
 *.tmp

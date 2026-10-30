@@ -1,0 +1,72 @@
+/* Small refinements for the CatCam user guide. */
+:root {
+  --catcam-green: #176c3d;
+}
+
+[data-md-color-scheme="slate"] {
+  --catcam-green: #57b982;
+}
+
+.md-typeset img {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.4rem;
+}
+
+.md-typeset figure {
+  margin: 1.2rem 0;
+}
+
+.md-typeset figcaption {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 0.4rem;
+}
+
+.md-typeset table:not([class]) {
+  font-size: 0.76rem;
+}
+
+.md-typeset h2 {
+  margin-top: 1.8em;
+}
+
+.catcam-hero {
+  border-radius: 0.6rem;
+  display: block;
+  margin: 1rem auto 0.4rem;
+  max-width: 100%;
+}
+
+.catcam-steps {
+  counter-reset: step;
+  list-style: none;
+  padding-left: 0;
+}
+
+.catcam-steps > li {
+  counter-increment: step;
+  margin-bottom: 0.9rem;
+  padding-left: 2.4rem;
+  position: relative;
+}
+
+.catcam-steps > li::before {
+  background: var(--catcam-green);
+  border-radius: 50%;
+  color: #fff;
+  content: counter(step);
+  font-size: 0.7rem;
+  font-weight: 700;
+  height: 1.6rem;
+  left: 0;
+  line-height: 1.6rem;
+  position: absolute;
+  text-align: center;
+  top: 0.1rem;
+  width: 1.6rem;
+}
