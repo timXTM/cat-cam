@@ -1,14 +1,17 @@
 # CatCam — Raspberry Pi Wildlife Camera
 
+[![Technical docs: DeepWiki](https://img.shields.io/badge/Technical_docs-DeepWiki-blue)](https://deepwiki.com/timXTM/cat-cam)
+
 **Documentation updated:** October 30, 2026 · **Code reviewed:** `timXTM/cat-cam`, `main`.
 
 CatCam is a self-hosted bird-feeder camera running on a Raspberry Pi Zero W. It watches a configurable region of interest (ROI), captures six high-resolution JPEGs per motion/manual trigger, classifies the burst, and serves a LAN dashboard, galleries, and bird-activity analytics. Optional Discord delivery sends bird-positive bursts. The system can use Google Cloud Vision or an authenticated local detector on a separate Raspberry Pi 4.
 
 > **Scope:** This repository contains the Pi Zero camera application, browser UI, and Pi 4 *client*. The Pi 4 AI server source code is included in [`pi-four/`](pi-four/). Large model weights, credentials, and the Syncthing deployment are not included. The addresses and paths below describe the current installation; they are not universal defaults.
 
-## User guide
+## Documentation
 
-A user-facing guide for non-developers is published at **<https://timxtm.github.io/cat-cam/>**. It covers the dashboard, camera controls, every Settings option, the Gallery and burst detail view, Bird Activity, troubleshooting, and an FAQ, with screenshots captured from the running camera.
+- **User guide:** <https://timxtm.github.io/cat-cam/> — for everyday CatCam users. Covers the dashboard, camera controls, every Settings option, the Gallery and burst detail view, Bird Activity, troubleshooting, and an FAQ, with screenshots captured from the running camera.
+- **Technical documentation:** <https://deepwiki.com/timXTM/cat-cam> — for developers exploring the codebase and implementation.
 
 The guide is built with MkDocs Material from [`docs/`](docs/) and deployed to GitHub Pages by [`.github/workflows/docs.yml`](.github/workflows/docs.yml). The CatCam header includes a **Help** link that opens `/help`, which redirects to the published guide. The guide is hosted separately so it remains available when the camera is offline.
 
