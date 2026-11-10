@@ -79,7 +79,7 @@ The case is part of the physical build; its printable design files are not inclu
 | `catcam_advanced.py` | Validation and persistence of advanced settings |
 | `catcam_stats.py` | SQLite schema, events, photo detections, Vision usage, species confirmation |
 | `catcam_activity.py` | Event-based bird analytics, inferred types, hierarchical filters |
-| `catcam_gallery.py` | Gallery discovery, filters, pagination |
+| `catcam_gallery.py` | Database-first Gallery filters and pagination; cached historical-folder discovery |
 | `catcam_cleanup.py` | Safe non-bird burst and thumbnail cleanup |
 | `catcam_thumbnails.py` | Background thumbnail generation/cache |
 | `catcam_dashboard.html` | Dashboard and Settings interface |
