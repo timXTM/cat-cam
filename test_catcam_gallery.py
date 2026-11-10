@@ -3,6 +3,7 @@ import sqlite3
 import os
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,7 +19,7 @@ class GalleryTests(unittest.TestCase):
         self.base = Path(self.tmp.name) / 'wildlife'
         self.base.mkdir()
         self.db = Path(self.tmp.name) / 'events.db'
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn, conn:
             conn.execute('CREATE TABLE events (id INTEGER PRIMARY KEY, folder TEXT, '
                          'classification TEXT, deleted INTEGER, photo_count INTEGER)')
         self.patches = [
@@ -41,7 +42,7 @@ class GalleryTests(unittest.TestCase):
         for n in range(1, count + 1):
             (folder / f'{n:02d}.jpg').touch()
         if classification is not None:
-            with sqlite3.connect(self.db) as conn:
+            with closing(sqlite3.connect(self.db)) as conn, conn:
                 conn.execute('INSERT INTO events (folder, classification, deleted, photo_count) '
                              'VALUES (?, ?, ?, ?)',
                              (str(folder), classification, int(deleted),
@@ -49,7 +50,7 @@ class GalleryTests(unittest.TestCase):
         return folder
 
     def activity(self, **filters):
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn:
             birds = conn.execute("SELECT folder FROM events WHERE classification='bird'").fetchall()
         events = [{'folder': folder, 'bird_type': 'Cardinal',
                    'detection_engine': 'local_ai'} for (folder,) in birds]

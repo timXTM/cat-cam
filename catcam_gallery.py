@@ -1,5 +1,6 @@
 """Read-only historical capture gallery; never invokes Google Vision."""
 import sqlite3
+from contextlib import closing
 import threading
 import time
 from pathlib import Path
@@ -127,7 +128,7 @@ def gallery(mode='all', bird_type='', start='', end='', start_hour='', end_hour=
     candidates = {}
     db = Path(catcam_stats.DB_PATH)
     if db.is_file():
-        with sqlite3.connect('file:' + str(db.resolve()) + '?mode=ro', uri=True, timeout=10) as conn:
+        with closing(sqlite3.connect('file:' + str(db.resolve()) + '?mode=ro', uri=True, timeout=10)) as conn:
             for folder, classification, deleted, photo_count in conn.execute(
                     'SELECT folder, classification, deleted, photo_count FROM events WHERE folder IS NOT NULL ORDER BY id'):
                 if folder:
