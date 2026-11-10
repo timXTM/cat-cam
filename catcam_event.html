@@ -102,6 +102,13 @@
 <div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Photo viewer"><button class="close" id="close" aria-label="Close photo">✕ Close</button><button class="prev" id="prev" aria-label="Previous photo">‹</button><div class="photo-viewport" id="photoViewport"><img id="largePhoto" alt="Enlarged capture" draggable="false"></div><button class="next" id="next" aria-label="Next photo">›</button><div class="metadata" id="photoMetadata" role="status"></div><div class="foot"><span id="photoPosition"></span><a id="originalLink" target="_blank" rel="noopener">Open original ↗</a></div></div>
 <script>
 const EVENT_DATA=__CATCAM_EVENT_DATA__;
+// Gallery links retain the filters used to open this burst or photo.
+// Accept only a local Gallery URL; direct links keep the normal /gallery fallback.
+const returnToGallery=new URLSearchParams(location.search).get('return');
+if(returnToGallery?.startsWith('/gallery?') && returnToGallery.length<2000){
+  document.querySelectorAll('.breadcrumb a[href="/gallery"], .actions a[href="/gallery"], #catcam-header .catcam-nav a[href="/gallery"]')
+    .forEach(link=>{link.href=returnToGallery});
+}
 const {date,event,photos}=EVENT_DATA;
 const detection=EVENT_DATA.detection||{};
 function labelNames(values){return (Array.isArray(values)?values:[]).map(v=>

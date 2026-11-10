@@ -32,6 +32,8 @@ Select any thumbnail to open that photo, or **Open burst →** to see the whole 
 
 Press **Apply filters** to reload the list. The status line shows `Showing X of Y matching bursts`.
 
+Your applied filters are kept in the Gallery URL. When you open a burst or a specific photo, **← Gallery** and **← Back to gallery** return to the same filters; your browser's Back button does too. You can also bookmark or share the filtered Gallery URL. A direct visit to Gallery without filters still uses your default Gallery preference.
+
 - **Show more captures** appears when there are more results. It adds the next page without losing the current list.
 - If no bursts match, the page says **No matching captures with photos available.**
 
